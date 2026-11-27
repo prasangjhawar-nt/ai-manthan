@@ -55,7 +55,7 @@ export function FlagList({ flags, max = 3 }: { flags: Flag[]; max?: number }) {
             type="button"
             onClick={(e) => e.stopPropagation()}
             aria-label={`${flags.length - max} more: ${flags.slice(max).map((f) => FLAG_LABEL[f]).join(", ")}`}
-            className="inline-flex h-[22px] items-center rounded-chip bg-surface-3 px-1.5 text-[11.5px] font-medium text-ink-2 transition-colors hover:bg-ink hover:text-white focus-visible:bg-ink focus-visible:text-white"
+            className="inline-flex h-[22px] items-center rounded-chip bg-surface-3 px-1.5 text-[11.5px] font-medium text-ink-2 transition-colors hover:bg-ink hover:text-surface focus-visible:bg-ink focus-visible:text-surface"
             data-testid="flags-more"
           >
             +{flags.length - max}

@@ -13,7 +13,7 @@ export const buttonStyles = cva(
       variant: {
         primary: "bg-obsidian text-white shadow-sm hover:bg-obsidian-hover",
         outline: "border border-line-strong bg-surface text-ink shadow-xs hover:border-ink-4 hover:bg-surface-2",
-        soft: "bg-surface-3 text-ink hover:bg-[#e2e5df]",
+        soft: "bg-surface-3 text-ink hover:bg-line-strong/60",
         ghost: "text-ink-2 hover:bg-surface-3 hover:text-ink",
         danger: "bg-danger text-white shadow-sm hover:bg-[#a83124]",
         "danger-soft": "border border-transparent bg-danger-soft text-danger hover:border-danger/25",
@@ -46,7 +46,7 @@ export function Button({ className, variant, size, caps, loading, children, disa
 
 /* ------------------------------------------------------------------ Card */
 export function Card({ className, ...props }: ComponentProps<"section">) {
-  return <section className={cn("rounded-card border border-line bg-surface", className)} {...props} />
+  return <section className={cn("lift rounded-card border border-line bg-surface", className)} {...props} />
 }
 
 export function CardHeader({ title, action, className, sub }: { title: ReactNode; action?: ReactNode; className?: string; sub?: ReactNode }) {
@@ -69,7 +69,7 @@ const toneClasses: Record<Tone, string> = {
   danger: "bg-danger-soft text-danger",
   info: "bg-info-soft text-info",
   violet: "bg-violet-soft text-violet",
-  ink: "bg-ink text-white",
+  ink: "bg-ink text-surface",
 }
 
 export function Badge({ tone = "neutral", dot, pulse, className, children }: { tone?: Tone; dot?: boolean; pulse?: boolean; className?: string; children: ReactNode }) {
@@ -185,12 +185,12 @@ export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("skeleton h-4", className)} aria-hidden />
 }
 
-const avatarHues = ["#dfe6dc", "#e6e1f6", "#f6e6d6", "#dcecf3", "#f3dfdc", "#ece8cf"]
+const avatarHues = ["#dfe6dc", "#e6e1f6", "#f6e6d6", "#dcecf3", "#f3dfdc", "#ece8cf"] // pastel in both themes; text stays dark
 export function Avatar({ name, size = 32, className }: { name: string; size?: number; className?: string }) {
   const hue = avatarHues[[...name].reduce((s, c) => s + c.charCodeAt(0), 0) % avatarHues.length]
   return (
     <span
-      className={cn("inline-grid shrink-0 place-items-center rounded-full font-semibold text-ink-2", className)}
+      className={cn("inline-grid shrink-0 place-items-center rounded-full font-semibold text-[#2f352e]", className)}
       style={{ width: size, height: size, background: hue, fontSize: Math.round(size * 0.36) }}
       aria-hidden
     >

@@ -5,6 +5,7 @@ import ClaimFormPage from "./ClaimFormPage"
 import ClaimsPage from "./ClaimsPage"
 import ApprovalsPage from "./ApprovalsPage"
 import PolicyPage from "./PolicyPage"
+import ClaimDetailPage from "./ClaimDetailPage"
 import { renderAt, signIn } from "@/test/render"
 import { FlagList } from "@/components/ds/domain"
 import { CityCombobox } from "@/components/ds/combobox"
@@ -140,6 +141,41 @@ describe("Approvals (ST-05, ST-07)", () => {
     renderAt("/approvals", [{ path: "/approvals", element: <ApprovalsPage /> }])
     await screen.findAllByText(/Brand shoot props|Kolkata vendor meeting/)
     expect(screen.queryByTestId("select-all")).toBeNull()
+  })
+})
+
+describe("Approver decision (ST-05)", () => {
+  it("approving returns the approver to the queue — regression: callbacks were lost when the bar unmounted", async () => {
+    await signIn("mgr.demo@expenseflow.test")
+    const { Api } = await import("@/api/endpoints")
+    const id = (await Api.getApprovalQueue()).content[0].id
+    const { user } = renderAt(`/approvals/${id}`, [
+      { path: "/approvals/:id", element: <ClaimDetailPage approverView /> },
+      { path: "/approvals", element: <div data-testid="queue" /> },
+    ])
+    await user.click(await screen.findByTestId("approve"))
+    await user.click(await screen.findByTestId("confirm-decision"))
+    expect(await screen.findByTestId("queue")).toBeInTheDocument()
+  })
+
+  it("send back is blocked until a comment is written", async () => {
+    await signIn("mgr.demo@expenseflow.test")
+    const { Api } = await import("@/api/endpoints")
+    const id = (await Api.getApprovalQueue()).content[0].id
+    const { user } = renderAt(`/approvals/${id}`, [{ path: "/approvals/:id", element: <ClaimDetailPage approverView /> }])
+    await user.click(await screen.findByTestId("send-back"))
+    expect(await screen.findByTestId("confirm-decision")).toBeDisabled()
+    await user.type(screen.getByTestId("decision-comment"), "Attach GST invoice")
+    expect(screen.getByTestId("confirm-decision")).toBeEnabled()
+  })
+
+  it("the owner never sees decision buttons on their own claim (R15)", async () => {
+    await signIn("emp.demo@expenseflow.test")
+    const { Api } = await import("@/api/endpoints")
+    const mine = (await Api.listMyClaims()).content.find((c) => c.status === "PENDING_MANAGER")!
+    renderAt(`/claims/${mine.id}`, [{ path: "/claims/:id", element: <ClaimDetailPage /> }])
+    expect(await screen.findByRole("heading", { level: 1, name: mine.title })).toBeInTheDocument()
+    expect(screen.queryByTestId("approve")).toBeNull()
   })
 })
 

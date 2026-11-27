@@ -27,6 +27,11 @@
   --obsidian-hover: #1b3327;
   --cobalt: #2e3fe5;          /* single data accent */
   --cobalt-soft: #eef0ff;
+  --hero: #11231a;            /* login showcase panel */
+  --glass: rgb(255 255 255 / 0.84);
+  --glass-line: rgb(17 35 26 / 0.08);
+  --glass-highlight: rgb(255 255 255 / 0.6);
+  --card-highlight: transparent;
 
   /* ---- Semantic ------------------------------------------------------- */
   --positive: #0f8a5f;
@@ -90,6 +95,111 @@
   --dur-slow: 420ms;
 }
 
+
+/* ==========================================================================
+   Dark theme — follows the OS unless the user picked Light/Dark in the app
+   ========================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    /* ---- Neutrals: warm charcoal, never pure black ---- */
+    --canvas: #111513;
+    --surface: #191e1b;
+    --surface-2: #20261f;
+    --surface-3: #29302a;
+    --line: #323a34;
+    --line-strong: #46504a;
+
+    --ink: #f1f4ef;
+    --ink-2: #d0d6ce;
+    --ink-3: #a0a89e;
+    --ink-4: #757d73;
+
+    /* ---- Brand: obsidian becomes a deep forest green so white-on-primary keeps 6:1 ---- */
+    --obsidian: #2b6a4d;
+    --obsidian-hover: #337a59;
+    --cobalt: #8391ff;
+    --cobalt-soft: #232a5c;
+  --hero: #1b3b2c;
+  --glass: rgb(25 30 27 / 0.82);
+  --glass-line: rgb(255 255 255 / 0.08);
+  --glass-highlight: rgb(255 255 255 / 0.05);
+  --card-highlight: rgb(255 255 255 / 0.045);
+
+    /* ---- Semantic (brighter fg, deep soft fills) ---- */
+    --positive: #45c08d;
+    --positive-soft: #163225;
+    --warning: #e3a54d;
+    --warning-soft: #372a14;
+    --danger: #f07563;
+    --danger-soft: #3e1f1a;
+    --info: #5bb7e2;
+    --info-soft: #132f3c;
+    --violet: #a597f7;
+    --violet-soft: #29234f;
+
+    /* ---- Category (validated on #161a17: lightness, chroma, CVD, contrast all pass) ---- */
+    --cat-meals: #c47f27;
+
+    --primary: var(--obsidian);
+    --ring: var(--cobalt);
+
+    --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.3);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-md: 0 6px 18px -4px rgb(0 0 0 / 0.55), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 24px 48px -12px rgb(0 0 0 / 0.7), 0 8px 16px -8px rgb(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  /* ---- Neutrals: warm charcoal, never pure black ---- */
+  --canvas: #111513;
+  --surface: #191e1b;
+  --surface-2: #20261f;
+  --surface-3: #29302a;
+  --line: #323a34;
+  --line-strong: #46504a;
+
+  --ink: #f1f4ef;
+  --ink-2: #d0d6ce;
+  --ink-3: #a0a89e;
+  --ink-4: #757d73;
+
+  /* ---- Brand: obsidian becomes a deep forest green so white-on-primary keeps 6:1 ---- */
+  --obsidian: #2b6a4d;
+  --obsidian-hover: #337a59;
+  --cobalt: #8391ff;
+  --cobalt-soft: #232a5c;
+  --hero: #1b3b2c;
+  --glass: rgb(25 30 27 / 0.82);
+  --glass-line: rgb(255 255 255 / 0.08);
+  --glass-highlight: rgb(255 255 255 / 0.05);
+  --card-highlight: rgb(255 255 255 / 0.045);
+
+  /* ---- Semantic (brighter fg, deep soft fills) ---- */
+  --positive: #45c08d;
+  --positive-soft: #163225;
+  --warning: #e3a54d;
+  --warning-soft: #372a14;
+  --danger: #f07563;
+  --danger-soft: #3e1f1a;
+  --info: #5bb7e2;
+  --info-soft: #132f3c;
+  --violet: #a597f7;
+  --violet-soft: #29234f;
+
+  /* ---- Category (validated on #161a17: lightness, chroma, CVD, contrast all pass) ---- */
+  --cat-meals: #c47f27;
+
+  --primary: var(--obsidian);
+  --ring: var(--cobalt);
+
+  --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 6px 18px -4px rgb(0 0 0 / 0.55), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 24px 48px -12px rgb(0 0 0 / 0.7), 0 8px 16px -8px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+}
+
 @theme inline {
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-heading: "Geist", ui-sans-serif, system-ui, sans-serif;
@@ -109,6 +219,7 @@
   --color-obsidian-hover: var(--obsidian-hover);
   --color-cobalt: var(--cobalt);
   --color-cobalt-soft: var(--cobalt-soft);
+  --color-hero: var(--hero);
   --color-positive: var(--positive);
   --color-positive-soft: var(--positive-soft);
   --color-warning: var(--warning);
@@ -277,6 +388,25 @@
     animation: var(--animate-shimmer);
     border-radius: 8px;
   }
+  /* Frosted surface for floating chrome only (sticky bars, popovers over content). */
+  .glass {
+    background-color: var(--glass);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+    border-color: var(--glass-line);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-sm);
+  }
+  /* Cards: faint top highlight (only visible in dark) so edges read on a dark canvas */
+  .lift {
+    box-shadow: inset 0 1px 0 var(--card-highlight);
+  }
+  /* Login showcase: lit from the top-right so it separates from the page in both themes */
+  .hero-panel {
+    background:
+      radial-gradient(120% 85% at 92% -5%, color-mix(in srgb, var(--hero) 45%, #4fae82) 0%, transparent 58%),
+      radial-gradient(90% 70% at -10% 110%, color-mix(in srgb, var(--hero) 75%, #000) 0%, transparent 60%),
+      var(--hero);
+  }
   /* Staggered entrance: style={{'--i': n}} */
   .stagger {
     animation: rise var(--dur-slow) var(--ease-out) both;
@@ -299,6 +429,12 @@
     background-repeat: repeat-x;
     height: 1px;
   }
+}
+
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: background-color 240ms var(--ease-out), border-color 240ms var(--ease-out), color 240ms var(--ease-out), fill 240ms var(--ease-out) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
