@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   // "mock" mode loads .env.mock → VITE_MOCK=1, so component tests run against src/api/mock.ts
   mode: "mock",
-  resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  resolve: { alias: { "@": path.resolve(import.meta.dirname, "./src") } },
   test: {
     environment: "jsdom",
     globals: true,

@@ -49,6 +49,7 @@ export default function LoginPage() {
     } catch (e) {
       if (e instanceof ApiError && e.status === 429) setServerError("Too many attempts. Wait a minute and try again.")
       else if (e instanceof ApiError && e.status === 401) setServerError("Email or password is incorrect.")
+      else if (e instanceof ApiError && (e.status === 0 || e.status >= 502)) setServerError(e.problem.detail ?? "The server isn't reachable. Start the backend or run npm run dev:mock.")
       else setServerError(e instanceof ApiError ? (e.problem.detail ?? e.message) : "Can't sign in right now.")
     }
   })
