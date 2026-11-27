@@ -1,0 +1,90 @@
+- id: ST-01
+  role: ALL
+  story: As a user I log in and see only the screens for my role.
+  acceptance:
+    - Given valid demo credentials, When I log in, Then I get a JWT and my role's home screen
+    - Given no token, When I call a claim API, Then I get 401
+    - Given an EMPLOYEE token, When I call an approver API, Then I get 403
+  rules: [R13]
+- id: ST-02
+  role: EMPLOYEE
+  story: As an employee I create a claim with line items and receipts and save it as a draft.
+  acceptance:
+    - Given a new claim, When I add lines (category, amount, date, vendor, city) and save, Then it is DRAFT with the total shown
+    - Given a receipt file, When I upload it, Then it is stored with its SHA-256 hash
+    - Given a DRAFT, When I reopen it, Then I can edit lines and receipts
+  rules: [R4, R5]
+- id: ST-03
+  role: EMPLOYEE
+  story: As an employee I submit a claim and the policy engine checks every line.
+  acceptance:
+    - Given a DRAFT, When I submit twice with the same Idempotency-Key, Then one submission and the same response
+    - Given a line breaking a limit, duplicate or weekend rule, When submitted, Then that line is ROUTE with a flag and the claim is PENDING_MANAGER
+    - Given a line above 500 INR without a receipt, When submitted, Then the claim is REJECTED with the reason
+  rules: [R1, R2, R3, R4, R5, R6, R7, R8, R11]
+- id: ST-04
+  role: EMPLOYEE
+  story: As an employee I see only my own claims and their status.
+  acceptance:
+    - Given my claims list, When it loads, Then only my claims appear with status badges
+    - Given another employee's claim id, When I request it, Then I get 404
+  rules: [R13]
+- id: ST-05
+  role: MANAGER
+  story: As a manager I approve, send back or reject my team's claims.
+  acceptance:
+    - Given PENDING_MANAGER with total <= 25000, When I approve, Then APPROVED; if > 25000, Then PENDING_AUDITOR
+    - Given a claim, When I send it back with a comment, Then NEEDS_CLARIFICATION and the employee can resubmit
+    - Given my own claim, When I try to approve it, Then I get 403
+  rules: [R9, R15]
+- id: ST-06
+  role: MANAGER
+  story: As a manager on leave my delegate approves for me.
+  acceptance:
+    - Given an active delegation, When the delegate approves, Then it succeeds and the audit row records both people
+    - Given an expired delegation, When the delegate approves, Then I get 403
+  rules: [R10, R14]
+- id: ST-07
+  role: AUDITOR
+  story: As an auditor I work a filtered review queue and bulk approve.
+  acceptance:
+    - Given the queue, When I filter by department, category, flag or amount, Then only matching claims show
+    - Given selected PENDING_AUDITOR claims, When I bulk approve, Then each moves to APPROVED or PENDING_HEAD (> 100000)
+    - Given auto-approved claims, When they are created, Then about 10% carry the sample_audit flag and appear in my queue
+  rules: [R9, R11]
+- id: ST-08
+  role: HEAD
+  story: As the finance head I approve claims above 1,00,000 INR.
+  acceptance:
+    - Given PENDING_HEAD, When I approve, Then APPROVED
+    - Given PENDING_HEAD, When I reject with a reason, Then REJECTED
+  rules: [R9]
+- id: ST-09
+  role: HEAD
+  story: As the finance head I pay approved claims through a payout batch.
+  acceptance:
+    - Given APPROVED claims with no open sample audit, When I create a batch, Then they become IN_PAYOUT and a bank CSV is generated
+    - Given the bank accepts the file, Then the claims become PAID and the bank reference is saved
+    - Given the bank is down, Then the claims stay IN_PAYOUT, no error reaches the user, and the 30 s job retries until PAID
+  rules: [R12]
+- id: ST-10
+  role: HEAD
+  story: As finance I see spend and approval performance on a dashboard.
+  acceptance:
+    - Given seeded data, When I open the dashboard, Then I see spend by category, department and month, violations, and average approval time
+    - Given the KPI cards, Then pending count and oldest pending age match the database
+  rules: [R1, R2, R3, R5, R6]
+- id: ST-11
+  role: ALL
+  story: As any user with access I see the full audit timeline of a claim.
+  acceptance:
+    - Given any action on a claim, Then exactly one audit row is written (who, action, from, to, when)
+    - Given the audit table, When anything tries to update or delete a row, Then it fails
+  rules: [R14]
+- id: ST-12
+  role: HEAD
+  story: As the operator I get metrics and an alert when approvals pile up.
+  acceptance:
+    - Given the backend runs, Then Prometheus has queue size per level, oldest pending age and bank call time
+    - Given the oldest pending approval exceeds the threshold, Then the alert fires in Grafana
+  rules: []
