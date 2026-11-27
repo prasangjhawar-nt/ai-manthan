@@ -1,0 +1,8 @@
+{
+  "request": { "method": "GET", "url": "/bank/health" },
+  "response": {
+    "status": 200,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": { "status": "UP" }
+  }
+}

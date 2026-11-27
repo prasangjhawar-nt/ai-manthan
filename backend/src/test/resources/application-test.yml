@@ -1,0 +1,26 @@
+spring:
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+expenseflow:
+  jwt:
+    secret: test-secret-at-least-32-bytes-long-xxxxxxxxxxxxxx
+    ttl-minutes: 60
+  bank:
+    base-url: http://localhost:0
+    timeout-ms: 500
+  payout:
+    retry-interval-ms: 3600000   # effectively disable the retry scheduler in tests
+  policy:
+    cache-ttl-seconds: 1
+
+management:
+  endpoint:
+    health:
+      show-details: always

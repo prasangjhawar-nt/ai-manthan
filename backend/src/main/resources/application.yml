@@ -1,0 +1,85 @@
+spring:
+  application:
+    name: expenseflow-backend
+  # Docker secret /run/secrets/db_password becomes the property "db_password" (devops.md 6.1)
+  config:
+    import: optional:configtree:/run/secrets/
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/app?options=-c%20TimeZone%3DUTC}
+    username: ${SPRING_DATASOURCE_USERNAME:app}
+    password: ${db_password:${SPRING_DATASOURCE_PASSWORD:app}}
+    hikari:
+      connection-init-sql: "SET TIME ZONE 'UTC'"
+      maximum-pool-size: 10
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate          # entities must match the Flyway schema; fail fast if they drift
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        # README 9.2 "no N+1 on lists": lazy employee/department/lines of a page load in a few IN (...) queries
+        default_batch_fetch_size: 64
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  # spring.mvc.problemdetails stays OFF: GlobalExceptionHandler builds every error (incl. framework ones) as
+  # RFC 9457 with correlationId and errors[]; Boot's handler would take precedence and drop both
+
+server:
+  port: 8080
+  shutdown: graceful              # drain in-flight requests on rolling restart (NFR-AVL-3)
+  forward-headers-strategy: native
+
+spring.web.error:
+  include-stacktrace: never
+  include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always        # /actuator is not routed by the gateway (NFR-SEC-6)
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db   # bank is NOT in liveness/readiness (demo-breaker 1)
+  metrics:
+    tags:
+      application: backend
+    distribution:
+      percentiles-histogram:
+        "[http.server.requests]": true
+        "[expenseflow_bank_call_seconds]": true
+      slo:
+        "[http.server.requests]": 100ms,500ms,1s
+
+expenseflow:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-secret-change-me-at-least-32-bytes-long!!}
+    ttl-minutes: ${JWT_TTL_MINUTES:60}
+  bank:
+    base-url: ${EXTERNAL_SERVICE_URL:http://localhost:8089}
+    timeout-ms: ${BANK_TIMEOUT_MS:3000}
+  payout:
+    retry-interval-ms: ${PAYOUT_RETRY_INTERVAL_MS:30000}
+  policy:
+    cache-ttl-seconds: 60
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs

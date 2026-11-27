@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "/bank/payouts",
+    "headers": {
+      "X-Batch-Ref": { "matches": "PB-\\d{8}-\\d{3,}" },
+      "Content-Type": { "contains": "text/csv" }
+    },
+    "bodyPatterns": [ { "contains": "batch_ref,claim_number" } ]
+  },
+  "response": {
+    "status": 202,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "bankReference": "BNK-{{randomValue length=6 type='ALPHANUMERIC' uppercase=true}}",
+      "status": "ACCEPTED",
+      "batchRef": "{{request.headers.X-Batch-Ref}}"
+    },
+    "transformers": ["response-template"]
+  }
+}

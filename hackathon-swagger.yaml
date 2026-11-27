@@ -24,6 +24,8 @@ tags:
   - name: Payouts
   - name: Dashboard
   - name: Policy
+  - name: Admin
+    description: HR / finance-head endpoints for provisioning users. Additive to contract-v1 (post T+35).
 
 paths:
   /api/auth/login:
@@ -846,6 +848,94 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/admin/users:
+    post:
+      tags: [Admin]
+      operationId: createUser
+      summary: Provision a single employee (HEAD only)
+      description: |
+        Server generates a random 16-character password, stores the BCrypt hash,
+        and returns the plaintext ONCE in the response. HR copies it and shares
+        it out-of-band. The server never surfaces the password again.
+        Writes a USER_CREATED audit event with actor = HEAD.
+      x-roles: [HEAD]
+      x-story: ST-13
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserRequest' }
+            example:
+              employeeCode: E0211
+              name: Nitin Chopra
+              email: nitin.c@expenseflow.test
+              role: EMPLOYEE
+              departmentId: 2
+              managerId: 3
+              accountNumber: '100000000211'
+              ifsc: ICIC0000211
+      responses:
+        '201':
+          description: User created; temporary password returned once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateUserResponse' }
+              example:
+                user: { id: 211, employeeCode: E0211, name: Nitin Chopra, email: nitin.c@expenseflow.test, role: EMPLOYEE, departmentId: 2, departmentName: Sales, managerId: 3 }
+                temporaryPassword: 3tvb#yTDRGUHnZe5
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/users/bulk:
+    post:
+      tags: [Admin]
+      operationId: bulkCreateUsers
+      summary: Provision many employees from a CSV upload (HEAD only)
+      description: |
+        Multipart upload. CSV must have the header:
+        `employee_code,name,email,role,department_code,manager_email,account_number,ifsc`.
+        Each row is processed independently: on success the response row carries
+        a temporaryPassword; on failure it carries errorStatus + errorDetail.
+        One USER_CREATED audit event per created user.
+      x-roles: [HEAD]
+      x-story: ST-13
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: text/csv, UTF-8, LF or CRLF
+      responses:
+        '200':
+          description: Per-row results
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkUserResponse' }
+              example:
+                processed: 3
+                succeeded: 2
+                failed: 1
+                results:
+                  - { row: 2, employeeCode: E0211, email: nitin.c@expenseflow.test, outcome: CREATED, userId: 211, temporaryPassword: 3tvb#yTDRGUHnZe5, errorStatus: null, errorDetail: null }
+                  - { row: 3, employeeCode: E0212, email: priya.d@expenseflow.test, outcome: CREATED, userId: 212, temporaryPassword: taa@xkP1LmQ4nRsT, errorStatus: null, errorDetail: null }
+                  - { row: 4, employeeCode: E0213, email: tanvi.k@expenseflow.test, outcome: SKIPPED, userId: null, temporaryPassword: null, errorStatus: 409, errorDetail: Email already in use }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1419,7 +1509,7 @@ components:
         onBehalfOfName: { type: [string, 'null'] }
         action:
           type: string
-          enum: [CLAIM_CREATED, CLAIM_UPDATED, CLAIM_SUBMITTED, POLICY_EVALUATED, CLAIM_APPROVED, CLAIM_SENT_BACK, CLAIM_REJECTED, SAMPLE_AUDIT_CLEARED, SAMPLE_AUDIT_FAILED, COMMENT_ADDED, RECEIPT_UPLOADED, DELEGATION_CREATED, PAYOUT_BATCH_CREATED, PAYOUT_SEND_FAILED, PAYOUT_SENT, CLAIM_PAID, LOGIN, SEEDED]
+          enum: [CLAIM_CREATED, CLAIM_UPDATED, CLAIM_SUBMITTED, POLICY_EVALUATED, CLAIM_APPROVED, CLAIM_SENT_BACK, CLAIM_REJECTED, SAMPLE_AUDIT_CLEARED, SAMPLE_AUDIT_FAILED, COMMENT_ADDED, RECEIPT_UPLOADED, DELEGATION_CREATED, PAYOUT_BATCH_CREATED, PAYOUT_SEND_FAILED, PAYOUT_SENT, CLAIM_PAID, LOGIN, SEEDED, USER_CREATED]
         entityType: { type: string, enum: [CLAIM, RECEIPT, DELEGATION, PAYOUT_BATCH, USER] }
         entityId: { type: integer, format: int64 }
         claimId: { type: [integer, 'null'], format: int64 }
@@ -1591,3 +1681,55 @@ components:
         tier1Cities:
           type: array
           items: { type: string }
+
+    # ---------- admin (user provisioning) ----------
+    CreateUserRequest:
+      type: object
+      required: [employeeCode, name, email, role, departmentId, accountNumber, ifsc]
+      properties:
+        employeeCode: { type: string, minLength: 2, maxLength: 32, pattern: '^[A-Za-z0-9_-]+$' }
+        name:         { type: string, minLength: 2, maxLength: 128 }
+        email:        { type: string, format: email, maxLength: 190 }
+        role:         { $ref: '#/components/schemas/Role' }
+        departmentId: { type: integer, format: int64 }
+        managerId:
+          oneOf:
+            - { type: integer, format: int64 }
+            - { type: 'null' }
+          description: Required when role is EMPLOYEE; may be null for MANAGER/AUDITOR/HEAD
+        accountNumber: { type: string, minLength: 9, maxLength: 32, pattern: '^[0-9]+$' }
+        ifsc:          { type: string, minLength: 11, maxLength: 11, pattern: '^[A-Z]{4}0[A-Z0-9]{6}$' }
+    CreateUserResponse:
+      type: object
+      required: [user, temporaryPassword]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        temporaryPassword:
+          type: string
+          description: |
+            Server-generated 16-character password, returned ONCE. Not stored anywhere
+            retrievable by the API after this response. HR must share it out-of-band.
+    BulkUserResult:
+      type: object
+      required: [row, outcome]
+      properties:
+        row: { type: integer, description: 1-based row index in the CSV (header is row 1) }
+        employeeCode: { type: [string, 'null'] }
+        email:        { type: [string, 'null'] }
+        outcome:      { type: string, enum: [CREATED, SKIPPED] }
+        userId:       { type: [integer, 'null'], format: int64 }
+        temporaryPassword:
+          type: [string, 'null']
+          description: Present only when outcome is CREATED
+        errorStatus:  { type: [integer, 'null'], description: '400 / 409 on SKIPPED' }
+        errorDetail:  { type: [string, 'null'] }
+    BulkUserResponse:
+      type: object
+      required: [processed, succeeded, failed, results]
+      properties:
+        processed: { type: integer }
+        succeeded: { type: integer }
+        failed:    { type: integer }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/BulkUserResult' }
