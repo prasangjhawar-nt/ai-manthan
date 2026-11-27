@@ -21,8 +21,12 @@ import type {
   PolicyConfig,
   ProblemDetail,
   ReceiptUpload,
+  Role,
   User,
+  BulkUserResult,
+  CreateUserRequest,
 } from "./types"
+import { BULK_USER_HEADER, DEPARTMENTS, USER_RULES } from "@/lib/departments"
 
 const STORE_KEY = "ef.mockdb.v1"
 const TIER1 = ["Mumbai", "Delhi", "Bengaluru", "Chennai", "Kolkata", "Hyderabad", "Pune", "Ahmedabad"]
@@ -47,13 +51,16 @@ interface Db {
   batches: PayoutBatch[]
   receipts: ReceiptUpload[]
   delegations: Delegation[]
+  /** Users provisioned through /api/admin/users (ST-13). */
+  users?: (User & { password: string })[]
   idem: Record<string, unknown>
 }
 
 const now = () => new Date().toISOString()
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
 const daysAgoDate = (d: number) => new Date(Date.now() - d * 86400_000).toISOString().slice(0, 10)
-const userById = (id: number) => USERS.find((u) => u.id === id)!
+const allUsers = () => [...USERS, ...(db.users ?? [])]
+const userById = (id: number) => allUsers().find((u) => u.id === id)!
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 let db = {} as Db
@@ -331,7 +338,7 @@ export async function mockFetch(url: string, init: RequestInit): Promise<Respons
   const q = u.searchParams
 
   if (path === "/api/auth/login" && method === "POST") {
-    const user = USERS.find((x) => x.email === body?.email?.trim().toLowerCase())
+    const user = allUsers().find((x) => x.email === body?.email?.trim().toLowerCase())
     if (!user || user.password !== body?.password) return problem(401, "Unauthorized", "Email or password is incorrect", path)
     const { password: _pw, ...pub } = user
     void _pw
@@ -339,7 +346,7 @@ export async function mockFetch(url: string, init: RequestInit): Promise<Respons
   }
 
   const token = headers.get("Authorization")?.replace("Bearer ", "")
-  const me = token?.startsWith("mock.") ? USERS.find((x) => x.id === Number(token.split(".")[1])) : undefined
+  const me = token?.startsWith("mock.") ? allUsers().find((x) => x.id === Number(token.split(".")[1])) : undefined
   if (!me) return problem(401, "Unauthorized", "Missing or expired token", path)
   const role = me.role
 
@@ -564,7 +571,7 @@ export async function mockFetch(url: string, init: RequestInit): Promise<Respons
   if (path === "/api/delegations") {
     if (role === "EMPLOYEE") return problem(403, "Forbidden", "Approvers only", path)
     if (method === "GET") return json(200, db.delegations.filter((d) => d.approverId === me.id || d.delegateId === me.id))
-    const delegate = USERS.find((x) => x.id === Number(body.delegateId))
+    const delegate = allUsers().find((x) => x.id === Number(body.delegateId))
     if (!delegate) return problem(400, "Validation failed", "Unknown delegate", path, [{ field: "delegateId", message: "no such employee" }])
     if (body.toDate < body.fromDate) return problem(400, "Validation failed", "End date is before start date", path, [{ field: "toDate", message: "must be on or after fromDate" }])
     const today = new Date().toISOString().slice(0, 10)
@@ -686,7 +693,78 @@ export async function mockFetch(url: string, init: RequestInit): Promise<Respons
     return json(200, cfg)
   }
 
+  // ---- admin: user provisioning (ST-13)
+  if (path === "/api/admin/users" && method === "POST") {
+    if (role !== "HEAD") return problem(403, "Forbidden", "Finance head only", path)
+    const errors = validateUser(body as Partial<CreateUserRequest>)
+    if (errors.length) return problem(400, "Validation failed", `${errors.length} field${errors.length > 1 ? "s are" : " is"} invalid`, path, errors)
+    const clash = userClash(body as CreateUserRequest)
+    if (clash) return problem(409, "Conflict", clash, path)
+    const created = createUser(me, body as CreateUserRequest)
+    return json(201, created)
+  }
+  if (path === "/api/admin/users/bulk" && method === "POST") {
+    if (role !== "HEAD") return problem(403, "Forbidden", "Finance head only", path)
+    const file = (init.body as FormData).get("file") as File | null
+    if (!file) return problem(400, "Validation failed", "file is required", path)
+    if (file.size > 5 * 1024 * 1024) return problem(413, "File too large", "Max 5 MB", path)
+    if (file.type && !["text/csv", "application/vnd.ms-excel", "text/plain"].includes(file.type)) return problem(415, "Unsupported file type", "Only CSV", path)
+    const rows = (await file.text()).replace(/^﻿/, "").split(/\r?\n/).filter((r) => r.trim())
+    if (rows[0]?.trim().toLowerCase() !== BULK_USER_HEADER) return problem(400, "Validation failed", `CSV header must be: ${BULK_USER_HEADER}`, path)
+    const results: BulkUserResult[] = rows.slice(1).map((line, i) => {
+      const [employeeCode = "", name = "", email = "", r = "", deptCode = "", managerEmail = "", accountNumber = "", ifsc = ""] = line.split(",").map((c) => c.trim())
+      const base = { row: i + 2, employeeCode: employeeCode || null, email: email || null }
+      const skip = (status: number, detail: string): BulkUserResult => ({ ...base, outcome: "SKIPPED", userId: null, temporaryPassword: null, errorStatus: status, errorDetail: detail })
+      const dept = DEPARTMENTS.find((d) => d.code.toLowerCase() === deptCode.toLowerCase())
+      if (!dept) return skip(400, `Unknown department_code "${deptCode}"`)
+      const mgr = managerEmail ? allUsers().find((u) => u.email === managerEmail.toLowerCase()) : undefined
+      if (managerEmail && !mgr) return skip(400, `Unknown manager_email "${managerEmail}"`)
+      const req: CreateUserRequest = { employeeCode, name, email, role: r.toUpperCase() as Role, departmentId: dept.id, managerId: mgr?.id ?? null, accountNumber, ifsc }
+      const errs = validateUser(req)
+      if (errs.length) return skip(400, errs.map((e) => `${e.field} ${e.message}`).join("; "))
+      const clash = userClash(req)
+      if (clash) return skip(409, clash)
+      const res = createUser(me, req)
+      return { ...base, outcome: "CREATED", userId: res.user.id, temporaryPassword: res.temporaryPassword, errorStatus: null, errorDetail: null }
+    })
+    const succeeded = results.filter((r) => r.outcome === "CREATED").length
+    return json(200, { processed: results.length, succeeded, failed: results.length - succeeded, results })
+  }
+
   return problem(404, "Not found", `No mock for ${method} ${path}`, path)
+}
+
+const ROLES: Role[] = ["EMPLOYEE", "MANAGER", "AUDITOR", "HEAD"]
+function validateUser(b: Partial<CreateUserRequest>) {
+  const e: { field: string; message: string }[] = []
+  if (!USER_RULES.employeeCode.test(b.employeeCode ?? "")) e.push({ field: "employeeCode", message: "must be 2–32 letters, digits, _ or -" })
+  if ((b.name?.trim().length ?? 0) < 2 || (b.name?.length ?? 0) > 128) e.push({ field: "name", message: "must be 2–128 characters" })
+  if (!USER_RULES.email.test(b.email ?? "") || (b.email?.length ?? 0) > 190) e.push({ field: "email", message: "must be a valid email" })
+  if (!ROLES.includes(b.role as Role)) e.push({ field: "role", message: "must be EMPLOYEE, MANAGER, AUDITOR or HEAD" })
+  if (!DEPARTMENTS.some((d) => d.id === b.departmentId)) e.push({ field: "departmentId", message: "unknown department" })
+  if (b.role === "EMPLOYEE" && b.managerId == null) e.push({ field: "managerId", message: "is required for EMPLOYEE" })
+  else if (b.managerId != null && !allUsers().some((u) => u.id === b.managerId && u.role !== "EMPLOYEE")) e.push({ field: "managerId", message: "no such manager" })
+  if (!USER_RULES.accountNumber.test(b.accountNumber ?? "")) e.push({ field: "accountNumber", message: "must be 9–32 digits" })
+  if (!USER_RULES.ifsc.test(b.ifsc ?? "")) e.push({ field: "ifsc", message: "must look like HDFC0001234" })
+  return e
+}
+function userClash(b: CreateUserRequest) {
+  if (allUsers().some((u) => u.email === b.email.trim().toLowerCase())) return "Email already in use"
+  if (allUsers().some((u) => u.employeeCode.toLowerCase() === b.employeeCode.toLowerCase())) return "Employee code already in use"
+  return null
+}
+function tempPassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789#@$%"
+  return [...crypto.getRandomValues(new Uint8Array(16))].map((n) => chars[n % chars.length]).join("")
+}
+function createUser(actor: User, b: CreateUserRequest) {
+  const dept = DEPARTMENTS.find((d) => d.id === b.departmentId)!
+  const temporaryPassword = tempPassword()
+  const user: User = { id: 200 + nextId(), employeeCode: b.employeeCode, name: b.name.trim(), email: b.email.trim().toLowerCase(), role: b.role, departmentId: dept.id, departmentName: dept.name, managerId: b.managerId ?? null }
+  ;(db.users ??= []).push({ ...user, password: temporaryPassword })
+  db.audit.push({ id: nextId(), actorId: actor.id, actorName: actor.name, onBehalfOfId: null, onBehalfOfName: null, action: "USER_CREATED", entityType: "USER", entityId: user.id, claimId: null, fromStatus: null, toStatus: null, details: { employeeCode: user.employeeCode, role: user.role }, correlationId: Math.random().toString(16).slice(2, 18), createdAt: now() })
+  persist()
+  return { user, temporaryPassword }
 }
 
 function sendBatch(id: number, actor: User) {

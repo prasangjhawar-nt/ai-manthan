@@ -12,6 +12,7 @@ const PayoutsPage = lazy(() => import("@/pages/PayoutsPage"))
 const DashboardPage = lazy(() => import("@/pages/DashboardPage"))
 const PolicyPage = lazy(() => import("@/pages/PolicyPage"))
 const DelegationPage = lazy(() => import("@/pages/DelegationPage"))
+const RegisterUserPage = lazy(() => import("@/pages/RegisterUserPage"))
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage"))
 
 function RequireAuth({ children, roles }: { children: ReactNode; roles?: Role[] }) {
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="/dashboard" element={<RequireAuth roles={["AUDITOR", "HEAD"]}><DashboardPage /></RequireAuth>} />
         <Route path="/delegation" element={<RequireAuth roles={APPROVERS}><DelegationPage /></RequireAuth>} />
         <Route path="/policy" element={<PolicyPage />} />
+        <Route path="/admin/users" element={<RequireAuth roles={["HEAD"]}><RegisterUserPage /></RequireAuth>} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

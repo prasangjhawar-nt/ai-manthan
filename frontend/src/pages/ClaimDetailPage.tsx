@@ -450,19 +450,19 @@ function DecisionBar({ claim }: { claim: Claim }) {
 
   const next = claim.currentLevel === "MANAGER" ? (claim.totalAmount > 25000 ? "Auditor" : null) : claim.currentLevel === "AUDITOR" ? (claim.totalAmount > 100000 ? "Finance head" : null) : null
 
-  const run = (action: Action, c = comment) =>
-    decision.mutate(
-      { action, comment: c },
-      {
-        onSuccess: (res) => {
-          setDialog(null)
-          setComment("")
-          toast.success(action === "approve" ? "Approved" : action === "reject" ? "Rejected" : "Sent back", { description: `${res.claimNumber} → ${STATUS_LABEL[res.status]}` })
-          nav("/approvals")
-        },
-        onError: (e) => toastError(e, "Couldn't record the decision"),
-      },
-    )
+  // mutateAsync (not mutate + per-call callbacks): the bar unmounts as soon as the refetched claim
+  // is no longer pending, and per-call callbacks are dropped for unmounted observers.
+  const run = async (action: Action, c = comment) => {
+    try {
+      const res = await decision.mutateAsync({ action, comment: c })
+      setDialog(null)
+      setComment("")
+      toast.success(action === "approve" ? "Approved" : action === "reject" ? "Rejected" : "Sent back", { description: `${res.claimNumber} → ${STATUS_LABEL[res.status]}` })
+      nav("/approvals")
+    } catch (e) {
+      toastError(e, "Couldn't record the decision")
+    }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -484,7 +484,7 @@ function DecisionBar({ claim }: { claim: Claim }) {
 
   return (
     <>
-      <div className="fixed inset-x-0 bottom-0 z-30 animate-rise border-t border-line bg-surface/95 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur-md lg:sticky lg:mx-6 lg:mb-4 lg:rounded-[16px] lg:border lg:shadow-lg">
+      <div className="fixed inset-x-0 bottom-0 z-30 glass animate-rise border-t px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] lg:sticky lg:mx-6 lg:mb-4 lg:rounded-[16px] lg:border lg:shadow-lg">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="hidden text-[13px] sm:block">
             <p className="font-medium">Your decision · {claim.currentLevel && LEVEL_LABEL[claim.currentLevel]} level</p>
@@ -565,7 +565,7 @@ function SampleAuditBar({ claim }: { claim: Claim }) {
   })
   return (
     <>
-      <div className="fixed inset-x-0 bottom-0 z-30 animate-rise border-t border-line bg-surface/95 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur-md lg:sticky lg:mx-6 lg:mb-4 lg:rounded-[16px] lg:border lg:shadow-lg">
+      <div className="fixed inset-x-0 bottom-0 z-30 glass animate-rise border-t px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] lg:sticky lg:mx-6 lg:mb-4 lg:rounded-[16px] lg:border lg:shadow-lg">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-[13px]">
             <p className="font-medium">Random sample audit</p>

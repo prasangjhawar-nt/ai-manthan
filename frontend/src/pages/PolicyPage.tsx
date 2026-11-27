@@ -93,18 +93,18 @@ function ThresholdRuler({ p }: { p: PolicyConfig }) {
           <div className="relative">
             {/* marker */}
             <div className="absolute -top-7 z-10 -translate-x-1/2 transition-[left] duration-500 ease-out-quint" style={{ left: `${pos.pct}%` }} aria-hidden>
-              <div className="num rounded-md bg-obsidian px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-white">₹{money0(amount)}</div>
-              <div className="mx-auto h-3 w-px bg-obsidian" />
+              <div className="num rounded-md bg-ink px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-surface">₹{money0(amount)}</div>
+              <div className="mx-auto h-3 w-px bg-ink" />
             </div>
             <div className="grid grid-cols-4 gap-[3px] overflow-hidden rounded-full">
               {bands.map((b, i) => (
-                <div key={b.label} className={cn("h-2.5 transition-colors duration-300", i === 0 ? "bg-positive/70" : i <= pos.idx ? "bg-obsidian" : "bg-surface-3", i === 0 && pos.idx > 0 && "bg-positive/35")} />
+                <div key={b.label} className={cn("h-2.5 transition-colors duration-300", i === 0 ? "bg-positive/70" : i <= pos.idx ? "bg-ink" : "bg-surface-3", i === 0 && pos.idx > 0 && "bg-positive/35")} />
               ))}
             </div>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-4">
             {bands.map((b, i) => (
-              <div key={b.label} className={cn("border-l-2 pl-2.5 transition-colors duration-300", i === pos.idx ? "border-obsidian" : "border-line")}>
+              <div key={b.label} className={cn("border-l-2 pl-2.5 transition-colors duration-300", i === pos.idx ? "border-ink" : "border-line")}>
                 <p className={cn("text-[13px] font-medium", i === pos.idx ? "text-ink" : "text-ink-2")}>{b.label}</p>
                 <p className="text-[11.5px] text-ink-3">{b.sub}</p>
               </div>

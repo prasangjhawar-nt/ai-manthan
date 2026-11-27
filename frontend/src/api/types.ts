@@ -183,6 +183,7 @@ export type AuditAction =
   | "CLAIM_PAID"
   | "LOGIN"
   | "SEEDED"
+  | "USER_CREATED"
 
 export interface AuditEvent {
   id: number
@@ -276,4 +277,42 @@ export interface QueueFilters {
   sampleAuditOnly?: boolean
   page?: number
   size?: number
+}
+
+// ---------- admin (user provisioning, ST-13 — additive to contract-v1)
+export interface CreateUserRequest {
+  employeeCode: string
+  name: string
+  email: string
+  role: Role
+  departmentId: number
+  /** Required when role is EMPLOYEE; may be null for MANAGER/AUDITOR/HEAD. */
+  managerId: number | null
+  accountNumber: string
+  ifsc: string
+}
+
+export interface CreateUserResponse {
+  user: User
+  /** Server-generated, returned ONCE. */
+  temporaryPassword: string
+}
+
+export interface BulkUserResult {
+  /** 1-based CSV row (header is row 1). */
+  row: number
+  employeeCode: string | null
+  email: string | null
+  outcome: "CREATED" | "SKIPPED"
+  userId: number | null
+  temporaryPassword: string | null
+  errorStatus: number | null
+  errorDetail: string | null
+}
+
+export interface BulkUserResponse {
+  processed: number
+  succeeded: number
+  failed: number
+  results: BulkUserResult[]
 }

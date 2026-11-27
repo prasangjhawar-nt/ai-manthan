@@ -198,7 +198,7 @@ function ClaimForm({ claim, policy }: { claim?: import("@/api/types").Claim; pol
         </div>
 
         {/* Summary — sticky sidebar on desktop, bottom sheet bar on mobile */}
-        <aside className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur-md lg:sticky lg:top-5 lg:self-start lg:rounded-card lg:border lg:p-0 lg:backdrop-blur-none">
+        <aside className="fixed inset-x-0 bottom-0 z-30 glass border-t px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] lg:sticky lg:top-5 lg:self-start lg:rounded-card lg:border lg:border-line lg:bg-surface lg:p-0 lg:shadow-none lg:backdrop-blur-none">
           <div className="lg:p-4">
             <div className="flex items-end justify-between gap-3 lg:block">
               <div>

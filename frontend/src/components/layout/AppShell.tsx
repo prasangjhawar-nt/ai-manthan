@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useState, type ReactNode } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { LayoutGrid, ReceiptText, Inbox, Landmark, ScrollText, UserRoundCog, LogOut, Menu, Plus, HelpCircle, Bell } from "lucide-react"
+import { LayoutGrid, ReceiptText, Inbox, Landmark, ScrollText, UserRoundCog, UserPlus, LogOut, Menu, Plus, HelpCircle, Bell } from "lucide-react"
 import type { Role } from "@/api/types"
 import { useAuth } from "@/lib/auth"
 import { ROLE_LABEL } from "@/lib/format"
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { Avatar, Button } from "@/components/ds/primitives"
 import { Drawer } from "@/components/ds/dialog"
 import { Logo } from "@/components/ds/logo"
+import { ThemeSwitch } from "@/lib/theme"
 import { useQueue } from "@/api/hooks"
 
 export { Logo }
@@ -25,6 +26,7 @@ const NAV: NavItem[] = [
   { to: "/claims", label: "My claims", icon: ReceiptText, roles: ["EMPLOYEE", "MANAGER", "AUDITOR", "HEAD"] },
   { to: "/payouts", label: "Payouts", icon: Landmark, roles: ["HEAD"] },
   { to: "/delegation", label: "Delegation", icon: UserRoundCog, roles: ["MANAGER", "AUDITOR", "HEAD"] },
+  { to: "/admin/users", label: "Register employee", icon: UserPlus, roles: ["HEAD"] },
   { to: "/policy", label: "Policy", icon: ScrollText, roles: ["EMPLOYEE", "MANAGER", "AUDITOR", "HEAD"] },
 ]
 
@@ -48,7 +50,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             key={item.to}
             to={item.to}
             onClick={onNavigate}
-            data-testid={`nav-${item.to.slice(1)}`}
+            data-testid={`nav-${item.to.slice(1).replace(/\//g, "-")}`}
             style={{ "--i": i } as React.CSSProperties}
             className={({ isActive }) =>
               cn(
@@ -79,7 +81,8 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" className="mt-2 w-full justify-start text-ink-3" onClick={logout} data-testid="logout">
+          <ThemeSwitch className="mt-3" />
+          <Button variant="ghost" size="sm" className="mt-1.5 w-full justify-start text-ink-3" onClick={logout} data-testid="logout">
             <LogOut /> Sign out
           </Button>
         </div>
@@ -132,7 +135,7 @@ export function AppShell() {
           className="scroll-thin relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface lg:rounded-panel lg:border lg:border-line lg:shadow-[0_1px_2px_rgb(17_35_26/0.04)]"
         >
           {/* Mobile bar */}
-          <div className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-surface/90 px-4 backdrop-blur-md lg:hidden">
+          <div className="sticky top-0 z-30 flex h-14 items-center justify-between glass border-b px-4 lg:hidden">
             <button className="-ml-2 grid size-10 place-items-center rounded-lg text-ink-2 hover:bg-surface-3" onClick={() => setDrawer(true)} aria-label="Open menu" data-testid="menu">
               <Menu className="size-5" />
             </button>

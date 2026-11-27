@@ -58,7 +58,9 @@ export function useDecision(id: number) {
         : v.action === "send-back"
           ? Api.sendBackClaim(id, v.comment)
           : Api.rejectClaim(id, v.comment),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      void invalidate()
+    },
   })
 }
 

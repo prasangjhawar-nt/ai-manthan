@@ -8,7 +8,7 @@ export function Modal({ open, onOpenChange, title, description, children, footer
   return (
     <D.Root open={open} onOpenChange={onOpenChange}>
       <D.Portal>
-        <D.Backdrop className="fixed inset-0 z-50 bg-[#0d1410]/30 backdrop-blur-[2px] transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+        <D.Backdrop className="fixed inset-0 z-50 bg-[#0d1410]/35 backdrop-blur-[3px] transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <D.Popup
           className={cn(
             "fixed z-50 flex max-h-[88dvh] w-full flex-col bg-surface shadow-lg outline-none transition-[opacity,transform] duration-300 ease-out-quint",
