@@ -56,7 +56,7 @@ jobs:
       - name: mvn verify (unit + Testcontainers)
         working-directory: backend
         run: mvn -B verify      # runner Maven 3.9; the committed wrapper points at a bundled Windows-checked-out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with: { name: surefire-reports, path: backend/target/surefire-reports, if-no-files-found: ignore }
 
@@ -109,7 +109,7 @@ jobs:
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/sbom:/out" $TRIVY_IMAGE image \
               --format cyclonedx --output "/out/sbom-$s.cdx.json" "expenseflow/$s:$TAG"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: sbom, path: sbom }
       - name: stack up (2 backend replicas)
         run: docker compose up -d --wait --wait-timeout 300 && docker compose ps
@@ -129,7 +129,7 @@ jobs:
       - run: docker compose build && docker compose up -d --wait --wait-timeout 300
       - name: k6 smoke 30 s against the backend replicas
         run: docker compose --profile loadtest run --rm -e TARGET=http://backend:8080 -e VUS=20 -e DURATION=30s -e NAME=ci-smoke k6
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with: { name: k6-summary, path: evidence/k6-*.json, if-no-files-found: ignore }
 
