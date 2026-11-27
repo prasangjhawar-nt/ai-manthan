@@ -16,6 +16,15 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.net.URI;
 import java.util.List;
@@ -68,43 +77,56 @@ public class GlobalExceptionHandler {
                 "Authentication required", req, null);
     }
 
-    /** Concurrent edit of the same claim (JPA @Version) – README 4.2 FR-CLM-5: stale version -> 409. */
-    @ExceptionHandler(org.springframework.dao.OptimisticLockingFailureException.class)
-    public ResponseEntity<ProblemDetail> onOptimisticLock(Exception ex, HttpServletRequest req) {
-        return build(HttpStatus.CONFLICT, "Conflict",
-                "The claim was changed by another request; reload and try again", req, null);
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ProblemDetail> onMissingHeader(MissingRequestHeaderException ex, HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, "Validation failed", ex.getHeaderName() + " header is required", req,
+                List.of(Map.of("field", ex.getHeaderName(), "message", "is required")));
     }
 
-    /** e.g. two parallel requests with the same Idempotency-Key (UNIQUE idem_key,user_id) -> 409, not 500. */
-    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
-    public ResponseEntity<ProblemDetail> onConstraint(org.springframework.dao.DataIntegrityViolationException ex,
-                                                      HttpServletRequest req) {
-        log.warn("Constraint violation: {}", ex.getMostSpecificCause().getMessage());
-        return build(HttpStatus.CONFLICT, "Conflict",
-                "The request conflicts with data that was just written; retry with the same Idempotency-Key", req, null);
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class,
+            MissingServletRequestPartException.class})
+    public ResponseEntity<ProblemDetail> onBadParam(Exception ex, HttpServletRequest req) {
+        String name = ex instanceof MethodArgumentTypeMismatchException m ? m.getName()
+                : ex instanceof MissingServletRequestParameterException p ? p.getParameterName()
+                : ((MissingServletRequestPartException) ex).getRequestPartName();
+        return build(HttpStatus.BAD_REQUEST, "Validation failed", "Invalid or missing '" + name + "'", req,
+                List.of(Map.of("field", name, "message", "is invalid or missing")));
     }
 
-    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
-    public ResponseEntity<ProblemDetail> onMediaType(Exception ex, HttpServletRequest req) {
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ProblemDetail> onMediaType(HttpMediaTypeNotSupportedException ex, HttpServletRequest req) {
         return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type", ex.getMessage(), req, null);
     }
 
-    @ExceptionHandler(org.springframework.web.bind.MissingRequestHeaderException.class)
-    public ResponseEntity<ProblemDetail> onMissingHeader(org.springframework.web.bind.MissingRequestHeaderException ex,
-                                                         HttpServletRequest req) {
-        return build(HttpStatus.BAD_REQUEST, "Missing header", "Header " + ex.getHeaderName() + " is required", req, null);
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ProblemDetail> onMethod(HttpRequestMethodNotSupportedException ex, HttpServletRequest req) {
+        return build(HttpStatus.METHOD_NOT_ALLOWED, "Method not allowed", ex.getMessage(), req, null);
     }
 
-    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<ProblemDetail> onTypeMismatch(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex,
-                                                        HttpServletRequest req) {
-        return build(HttpStatus.BAD_REQUEST, "Bad request", "Invalid value for " + ex.getName(), req, null);
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ProblemDetail> onNoRoute(NoResourceFoundException ex, HttpServletRequest req) {
+        return build(HttpStatus.NOT_FOUND, "Not found", "No such endpoint", req, null);
     }
 
-    /** e.g. PageRequest.of(-1, ...) for ?page=-1 – a bad request, not a server error */
+    /** Concurrent edit (JPA @Version) or a stale lock - README 4.2 FR-CLM-5: stale version -> 409.
+     *  The DAO base type also covers optimistic-lock failures not wrapped as ObjectOptimisticLockingFailureException. */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ProblemDetail> onStale(OptimisticLockingFailureException ex, HttpServletRequest req) {
+        return build(HttpStatus.CONFLICT, "Stale version",
+                "Someone else changed this record. Reload and try again.", req, null);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ProblemDetail> onIntegrity(DataIntegrityViolationException ex, HttpServletRequest req) {
+        log.warn("Data integrity violation: {}", ex.getMostSpecificCause().getMessage());
+        return build(HttpStatus.CONFLICT, "Conflict", "The request conflicts with existing data", req, null);
+    }
+
+    /** e.g. PageRequest.of(-1, ...) for ?page=-1 - a bad request, not a server error */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ProblemDetail> onIllegalArgument(IllegalArgumentException ex, HttpServletRequest req) {
-        return build(HttpStatus.BAD_REQUEST, "Bad request", "Invalid request parameter", req, null);
+        log.debug("Illegal argument: {}", ex.getMessage());
+        return build(HttpStatus.BAD_REQUEST, "Validation failed", "Invalid request parameter", req, null);
     }
 
     @ExceptionHandler(Exception.class)

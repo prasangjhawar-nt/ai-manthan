@@ -21,6 +21,8 @@ import com.expenseflow.repository.ClaimRepository;
 import com.expenseflow.repository.DelegationRepository;
 import com.expenseflow.repository.ReceiptRepository;
 import com.expenseflow.security.CurrentUser;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -37,6 +39,9 @@ import java.util.Optional;
 
 @Service
 public class ClaimService {
+
+    @PersistenceContext
+    private EntityManager em;
 
     private final ClaimRepository claims;
     private final ReceiptRepository receipts;
@@ -107,9 +112,7 @@ public class ClaimService {
         }
         c.setTitle(req.title());
         c.getLines().clear();
-        // delete the old lines now: otherwise the new line_no 1..n are inserted first and hit
-        // UNIQUE (claim_id, line_no) -> every edit failed (FR-CLM-5, FR-APR-3 edit + resubmit)
-        claims.flush();
+        em.flush(); // force orphan deletes before new line inserts (unique(claim_id,line_no))
         applyLines(c, req.lines());
         Claim saved = claims.saveAndFlush(c);   // flushed so the response carries the new version
 

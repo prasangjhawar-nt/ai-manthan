@@ -57,7 +57,7 @@ class ApprovalServiceTest {
         claimService = mock(ClaimService.class);
         idem = mock(IdempotencyService.class);
         cache = mock(PolicyConfigCache.class);
-        when(cache.get()).thenReturn(PolicyEngineTest.snapshot());
+        when(cache.get()).thenReturn(PolicyEngineEdgeCaseTest.snapshot());
         when(claims.save(any(Claim.class))).thenAnswer(inv -> inv.getArgument(0));
         service = new ApprovalService(claims, steps, delegations, current, audit, claimService, idem, cache);
         service.setTransactionManager(mock(org.springframework.transaction.PlatformTransactionManager.class));

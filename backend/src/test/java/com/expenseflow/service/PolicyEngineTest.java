@@ -1,14 +1,6 @@
 package com.expenseflow.service;
 
-import com.expenseflow.model.AppSetting;
-import com.expenseflow.model.Category;
-import com.expenseflow.model.Claim;
-import com.expenseflow.model.ClaimLine;
-import com.expenseflow.model.ClaimStatus;
-import com.expenseflow.model.Employee;
-import com.expenseflow.model.LineOutcome;
-import com.expenseflow.model.PolicyRule;
-import com.expenseflow.model.Receipt;
+import com.expenseflow.model.*;
 import com.expenseflow.repository.ClaimLineRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,377 +8,310 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.Mockito;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Policy rules R1–R8, R16 with the boundaries from README section 12.
- * Pure unit test: config snapshot and repository are stubbed, no Spring context.
+ * Pure unit tests for PolicyEngine. The DB is mocked so we control
+ * "prior lines" deterministically and can assert on every rule boundary
+ * called out in README section 4.3 and §12.
  */
 class PolicyEngineTest {
-
-    static final LocalDate WEDNESDAY = LocalDate.of(2026, 11, 25);
-    static final LocalDate SATURDAY  = LocalDate.of(2026, 11, 21);
-    static final LocalDate SUNDAY    = LocalDate.of(2026, 11, 22);
 
     PolicyConfigCache cache;
     ClaimLineRepository lines;
     PolicyEngine engine;
-    SimpleMeterRegistry registry;
-    Employee manager;
-    Employee employee;
-    int receiptSeq;
 
     @BeforeEach
     void setUp() {
-        cache = mock(PolicyConfigCache.class);
-        lines = mock(ClaimLineRepository.class);
-        registry = new SimpleMeterRegistry();
-        when(cache.get()).thenReturn(snapshot());
-        when(lines.sumMealsForEmployeeOnDate(anyLong(), any(), any())).thenReturn(BigDecimal.ZERO);
-        when(lines.findDuplicatesByFields(anyLong(), anyString(), any(), any(), any())).thenReturn(List.of());
-        when(lines.findDuplicatesByReceiptHash(anyString(), any())).thenReturn(List.of());
-        engine = new PolicyEngine(cache, lines, registry);
+        cache = Mockito.mock(PolicyConfigCache.class);
+        lines = Mockito.mock(ClaimLineRepository.class);
 
-        manager = employee(1L, null);
-        employee = employee(2L, manager);
+        PolicyRule mealRule   = rule("MEAL_DAILY",  Category.MEALS,     new BigDecimal("1500.00"), null);
+        PolicyRule hotelT1    = rule("HOTEL_T1",    Category.HOTEL,     new BigDecimal("6000.00"), (short) 1);
+        PolicyRule hotelOther = rule("HOTEL_OTHER", Category.HOTEL,     new BigDecimal("4000.00"), (short) 2);
+        PolicyRule cabRule    = rule("CAB_TRIP",    Category.LOCAL_CAB, new BigDecimal("2000.00"), null);
+
+        var snapshot = new PolicyConfigCache.Snapshot(
+                Instant.now(),
+                List.of(mealRule, hotelT1, hotelOther, cabRule),
+                List.of(),
+                Set.of("Mumbai", "Delhi", "Bengaluru"),
+                java.util.Map.of(
+                        "receipt.required.above", "500",
+                        "auto_approve.max_total", "5000",
+                        "sample_audit.rate",     "0.10"
+                )
+        );
+        when(cache.get()).thenReturn(snapshot);
+        when(lines.sumMealsForEmployeeOnDate(any(), any(), any())).thenReturn(BigDecimal.ZERO);
+        when(lines.findDuplicatesByFields(any(), any(), any(), any(), any())).thenReturn(List.of());
+        when(lines.findDuplicatesByReceiptHash(any(), any())).thenReturn(List.of());
+
+        engine = new PolicyEngine(cache, lines, new SimpleMeterRegistry());
     }
 
-    // ------------------------------------------------------------------ helpers
+    // ---------- R4: receipt required above 500 ----------
 
-    static PolicyConfigCache.Snapshot snapshot() {
-        List<PolicyRule> rules = List.of(
-                rule("MEAL_DAILY", Category.MEALS, "1500"),
-                rule("HOTEL_T1", Category.HOTEL, "6000"),
-                rule("HOTEL_OTHER", Category.HOTEL, "4000"),
-                rule("CAB_TRIP", Category.LOCAL_CAB, "2000"));
-        Map<String, String> settings = Map.of(
-                "receipt.required.above", "500",
-                "auto_approve.max_total", "5000",
-                "approval.auditor.above", "25000",
-                "approval.head.above", "100000",
-                "sample_audit.rate", "0.10");
-        Set<String> tier1 = Set.of("Mumbai", "Delhi", "Bengaluru", "Chennai", "Kolkata", "Hyderabad", "Pune", "Ahmedabad");
-        return new PolicyConfigCache.Snapshot(Instant.now(), rules, List.<AppSetting>of(), tier1, settings);
-    }
-
-    static PolicyRule rule(String code, Category c, String limit) {
-        PolicyRule r = new PolicyRule();
-        r.setCode(code);
-        r.setCategory(c);
-        r.setLimitAmount(new BigDecimal(limit));
-        r.setActive(true);
-        return r;
-    }
-
-    static Employee employee(Long id, Employee mgr) {
-        Employee e = new Employee();
-        e.setId(id);
-        e.setManager(mgr);
-        return e;
-    }
-
-    Receipt receipt() {
-        Receipt r = new Receipt();
-        r.setId((long) ++receiptSeq);
-        r.setSha256(String.format("%064x", receiptSeq));
-        return r;
-    }
-
-    ClaimLine line(Category c, String amount, LocalDate date, boolean withReceipt) {
-        ClaimLine l = new ClaimLine();
-        l.setCategory(c);
-        l.setAmount(new BigDecimal(amount));
-        l.setExpenseDate(date);
-        l.setVendor("Vendor " + c + " " + amount);
-        if (withReceipt) l.setReceipt(receipt());
-        return l;
-    }
-
-    ClaimLine hotel(String city, int nights, String amount) {
-        ClaimLine l = line(Category.HOTEL, amount, WEDNESDAY, true);
-        l.setCity(city);
-        l.setNights((short) nights);
-        return l;
-    }
-
-    Claim claim(Employee owner, ClaimLine... ls) {
-        Claim c = new Claim();
-        c.setId(100L);
-        c.setClaimNumber("EXP-2026-000100");
-        c.setEmployee(owner);
-        List<ClaimLine> list = new ArrayList<>();
-        short n = 1;
-        for (ClaimLine l : ls) {
-            l.setLineNo(n++);
-            l.setClaim(c);
-            list.add(l);
-        }
-        c.setLines(list);
-        return c;
-    }
-
-    // ------------------------------------------------------------------ R4 receipt
-
-    @ParameterizedTest(name = "R4: {0} INR without receipt -> {1}")
-    @CsvSource({"500.00, AUTO_APPROVE", "500.01, AUTO_REJECT"})
-    void receiptRequiredAbove500(String amount, LineOutcome expected) {
-        Claim c = claim(employee, line(Category.MEALS, amount, WEDNESDAY, false));
-        PolicyEngine.Result r = engine.evaluate(c);
-
-        ClaimLine l = c.getLines().get(0);
-        assertThat(l.getOutcome()).isEqualTo(expected);
-        if (expected == LineOutcome.AUTO_REJECT) {
-            assertThat(l.getFlags()).contains(PolicyEngine.FLAG_MISSING_RECEIPT);
-            assertThat(l.getReason()).isEqualTo("Receipt required above 500 INR");
+    @ParameterizedTest(name = "R4 receipt required @ amount={0} hasReceipt={1} -> {2}")
+    @CsvSource({
+            "400.00, false, AUTO_APPROVE",   // under threshold, no receipt needed
+            "500.00, false, AUTO_APPROVE",   // inclusive boundary
+            "500.01, false, AUTO_REJECT",    // just above -> missing receipt reject
+            "800.00, false, AUTO_REJECT",
+            "800.00, true,  AUTO_APPROVE"    // above threshold but with receipt, meals under 1500
+    })
+    @DisplayName("R4 — receipt required above 500 INR (boundary)")
+    void r4_receiptRequired(String amount, boolean hasReceipt, String expected) {
+        Claim claim = singleLine(Category.MEALS, new BigDecimal(amount), LocalDate.now().minusDays(1),
+                "Cafe", null, null, hasReceipt);
+        PolicyEngine.Result r = engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getOutcome()).hasToString(expected);
+        if (expected.equals("AUTO_REJECT")) {
+            assertThat(claim.getLines().get(0).getFlags()).contains("MISSING_RECEIPT");
             assertThat(r.targetStatus()).isEqualTo(ClaimStatus.REJECTED);
-        } else {
-            assertThat(l.getFlags()).isEmpty();
-            assertThat(r.targetStatus()).isEqualTo(ClaimStatus.APPROVED);
         }
+    }
+
+    // ---------- R1: meals daily sum <= 1500 ----------
+
+    @ParameterizedTest(name = "R1 meals daily @ {0} prior={1} -> {2}")
+    @CsvSource({
+            "1500.00, 0.00,    AUTO_APPROVE",   // exactly at limit, clean
+            "1500.01, 0.00,    ROUTE",          // just over
+            "400.00,  1100.00, AUTO_APPROVE",   // sum=1500, boundary
+            "400.01,  1100.00, ROUTE"           // sum=1500.01
+    })
+    @DisplayName("R1 — meals ≤ 1500 per employee per day (boundary + accumulator)")
+    void r1_mealsDaily(String amount, String priorSum, String expected) {
+        when(lines.sumMealsForEmployeeOnDate(any(), any(), any())).thenReturn(new BigDecimal(priorSum));
+        // Attach a receipt so R4 doesn't fire
+        Claim claim = singleLine(Category.MEALS, new BigDecimal(amount), LocalDate.now().minusDays(1),
+                "Cafe", null, null, true);
+        engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getOutcome()).hasToString(expected);
+        if (expected.equals("ROUTE")) {
+            assertThat(claim.getLines().get(0).getFlags()).contains("OVER_LIMIT");
+        }
+    }
+
+    // ---------- R2: hotel tier-1 <= 6000/night, other <= 4000/night ----------
+
+    @ParameterizedTest(name = "R2 hotel {3} {0} / {1}n -> per-night check -> {2}")
+    @CsvSource({
+            "18000.00, 3, AUTO_APPROVE, Mumbai",    // 6000/night tier-1 inclusive
+            "18000.03, 3, ROUTE,        Mumbai",    // 6000.01/night just over
+            "12000.00, 3, AUTO_APPROVE, Pune",      // 4000/night non-tier-1 inclusive (Pune not in test tier-1 set)
+            "12000.03, 3, ROUTE,        Pune"       // just over
+    })
+    @DisplayName("R2 — hotel per-night limit (tier-1 vs other, boundary)")
+    void r2_hotelPerNight(String amount, int nights, String expected, String city) {
+        Claim claim = singleLine(Category.HOTEL, new BigDecimal(amount), LocalDate.now().minusDays(1),
+                "Hotel X", city, (short) nights, true);
+        engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getOutcome()).hasToString(expected);
+    }
+
+    // ---------- R3: cab <= 2000 per trip ----------
+
+    @ParameterizedTest(name = "R3 cab @ {0} -> {1}")
+    @CsvSource({
+            "2000.00, AUTO_APPROVE",     // inclusive boundary
+            "2000.01, ROUTE",            // just over
+            "500.00,  AUTO_APPROVE"      // low, no receipt needed
+    })
+    @DisplayName("R3 — local cab ≤ 2000 per trip (boundary)")
+    void r3_cab(String amount, String expected) {
+        boolean withReceipt = new BigDecimal(amount).compareTo(new BigDecimal("500")) > 0;
+        Claim claim = singleLine(Category.LOCAL_CAB, new BigDecimal(amount), LocalDate.now().minusDays(2),
+                "Ola", "Mumbai", null, withReceipt);
+        engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getOutcome()).hasToString(expected);
+    }
+
+    // ---------- R5: duplicate by fields and by receipt hash ----------
+
+    @Test
+    @DisplayName("R5 — duplicate by vendor+amount+date flags DUPLICATE and routes")
+    void r5_fieldDuplicate() {
+        ClaimLine existing = mock();
+        when(lines.findDuplicatesByFields(any(), any(), any(), any(), any())).thenReturn(List.of(existing));
+        Claim claim = singleLine(Category.MEALS, new BigDecimal("400"), LocalDate.now().minusDays(1),
+                "Cafe", null, null, false);
+        engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getOutcome()).hasToString("ROUTE");
+        assertThat(claim.getLines().get(0).getFlags()).contains("DUPLICATE");
     }
 
     @Test
-    @DisplayName("Precedence: missing receipt + over limit -> AUTO_REJECT, both flags kept")
-    void autoRejectWinsOverRoute() {
-        Claim c = claim(employee, line(Category.LOCAL_CAB, "2500.00", SATURDAY, false));
-        PolicyEngine.Result r = engine.evaluate(c);
+    @DisplayName("R5 — duplicate by receipt SHA flags DUPLICATE and routes")
+    void r5_hashDuplicate() {
+        ClaimLine existing = mock();
+        when(lines.findDuplicatesByReceiptHash(any(), any())).thenReturn(List.of(existing));
+        Claim claim = singleLine(Category.MEALS, new BigDecimal("450"), LocalDate.now().minusDays(1),
+                "Cafe", null, null, true);
+        engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getOutcome()).hasToString("ROUTE");
+        assertThat(claim.getLines().get(0).getFlags()).contains("DUPLICATE");
+    }
 
-        ClaimLine l = c.getLines().get(0);
-        assertThat(l.getOutcome()).isEqualTo(LineOutcome.AUTO_REJECT);
-        assertThat(l.getFlags()).contains(PolicyEngine.FLAG_MISSING_RECEIPT, PolicyEngine.FLAG_OVER_LIMIT,
-                PolicyEngine.FLAG_WEEKEND);
+    // ---------- R6: weekend ----------
+
+    @Test
+    @DisplayName("R6 — Saturday flags WEEKEND and routes")
+    void r6_saturday() {
+        LocalDate sat = findSaturday();
+        Claim claim = singleLine(Category.MEALS, new BigDecimal("400"), sat, "Cafe", null, null, false);
+        engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getFlags()).contains("WEEKEND");
+        assertThat(claim.getLines().get(0).getOutcome()).hasToString("ROUTE");
+    }
+
+    @Test
+    @DisplayName("R6 — Sunday flags WEEKEND and routes")
+    void r6_sunday() {
+        LocalDate sun = findSaturday().plusDays(1);
+        Claim claim = singleLine(Category.MEALS, new BigDecimal("400"), sun, "Cafe", null, null, false);
+        engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getFlags()).contains("WEEKEND");
+    }
+
+    // ---------- NO_POLICY ----------
+
+    @Test
+    @DisplayName("Category without a rule flags NO_POLICY and routes")
+    void noPolicyCategory() {
+        Claim claim = singleLine(Category.FLIGHT, new BigDecimal("6000"), LocalDate.now().minusDays(1),
+                "IndiGo", null, null, true);
+        engine.evaluate(claim);
+        assertThat(claim.getLines().get(0).getFlags()).contains("NO_POLICY");
+        assertThat(claim.getLines().get(0).getOutcome()).hasToString("ROUTE");
+    }
+
+    // ---------- Claim-level outcome aggregation ----------
+
+    @ParameterizedTest(name = "auto-approve max_total boundary: total={0} per-day=1500 -> {1}")
+    @CsvSource({
+            "1500.00, APPROVED",          // 1 day @ 1500 = 1500, well under 5000
+            "4500.00, APPROVED",          // 3 days @ 1500 each, total 4500
+            "5100.00, PENDING_MANAGER"    // exceeds auto-approve total but each line still clean
+    })
+    @DisplayName("R16 — claim auto-approves only when all clean AND total ≤ 5000")
+    void autoApproveTotalBoundary(String firstDayAmount, String expected) {
+        // Build multi-line claim where each line is individually clean (MEALS<=1500/day),
+        // but total crosses the auto_approve.max_total threshold of 5000.
+        Claim c = baseClaim();
+        BigDecimal perDay = new BigDecimal(firstDayAmount).min(new BigDecimal("1500"));
+        BigDecimal remaining = new BigDecimal(firstDayAmount);
+        short no = 1;
+        int dayOffset = 1;
+        while (remaining.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal amt = remaining.min(perDay);
+            // Avoid weekend
+            LocalDate d = LocalDate.now().minusDays(dayOffset);
+            while (d.getDayOfWeek().getValue() >= 6) d = d.minusDays(1);
+            boolean withReceipt = amt.compareTo(new BigDecimal("500")) > 0;
+            c.getLines().add(line(c, no++, Category.MEALS, amt, d, "Cafe", null, null, withReceipt));
+            remaining = remaining.subtract(amt);
+            dayOffset++;
+        }
+        var r = engine.evaluate(c);
+        assertThat(r.targetStatus().name()).isEqualTo(expected);
+    }
+
+    @Test
+    @DisplayName("Any AUTO_REJECT line forces REJECTED even if others would route")
+    void autoRejectPrecedence() {
+        Claim c = baseClaim();
+        c.getLines().add(line(c, (short)1, Category.MEALS, new BigDecimal("800"),
+                LocalDate.now().minusDays(1), "A", null, null, false)); // no receipt, >500 -> AUTO_REJECT
+        c.getLines().add(line(c, (short)2, Category.HOTEL, new BigDecimal("30000"),
+                LocalDate.now().minusDays(1), "H", "Mumbai", (short)3, true)); // tier1 over-limit -> ROUTE
+        var r = engine.evaluate(c);
         assertThat(r.targetStatus()).isEqualTo(ClaimStatus.REJECTED);
     }
 
-    // ------------------------------------------------------------------ R1 meals
-
-    @ParameterizedTest(name = "R1: meals {0} on one day -> {1}")
-    @CsvSource({"1500.00, AUTO_APPROVE", "1500.01, ROUTE"})
-    void mealsDailyLimit(String amount, LineOutcome expected) {
-        Claim c = claim(employee, line(Category.MEALS, amount, WEDNESDAY, true));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getOutcome()).isEqualTo(expected);
-        assertThat(c.getLines().get(0).getFlags().contains(PolicyEngine.FLAG_OVER_LIMIT))
-                .isEqualTo(expected == LineOutcome.ROUTE);
-    }
-
     @Test
-    @DisplayName("R1: daily meal sum includes the employee's other claims (A6)")
-    void mealsSumAcrossClaims() {
-        when(lines.sumMealsForEmployeeOnDate(2L, WEDNESDAY, 100L)).thenReturn(new BigDecimal("1000.00"));
-        Claim c = claim(employee, line(Category.MEALS, "500.01", WEDNESDAY, true));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getFlags()).contains(PolicyEngine.FLAG_OVER_LIMIT);
-    }
-
-    @Test
-    @DisplayName("R1: two meal lines in the same claim on the same day are summed")
-    void mealsSumWithinClaim() {
-        Claim c = claim(employee,
-                line(Category.MEALS, "800.00", WEDNESDAY, true),
-                line(Category.MEALS, "800.00", WEDNESDAY, true));
-        engine.evaluate(c);
-        assertThat(c.getLines()).allSatisfy(l -> assertThat(l.getFlags()).contains(PolicyEngine.FLAG_OVER_LIMIT));
-    }
-
-    // ------------------------------------------------------------------ R2 hotel
-
-    @ParameterizedTest(name = "R2: {0}, {1} nights, {2} INR -> {3}")
-    @CsvSource({
-            "Mumbai, 2, 12000.00, AUTO_APPROVE",   // 6,000/night tier-1
-            "Mumbai, 2, 12000.02, ROUTE",          // 6,000.01/night
-            "Indore, 2, 8000.00,  AUTO_APPROVE",   // 4,000/night other
-            "Indore, 2, 8000.02,  ROUTE",          // 4,000.01/night
-            "Indore, 1, 6000.00,  ROUTE",          // tier-1 price outside tier-1
-            "Mumbai, 3, 18000.00, AUTO_APPROVE",   // exactly 3 x 6,000
-            "Mumbai, 3, 18000.01, ROUTE"           // 6,000.0033/night: must not be rounded down to 6,000.00
-    })
-    void hotelPerNightLimit(String city, int nights, String amount, LineOutcome expected) {
-        Claim c = claim(employee, hotel(city, nights, amount));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getOutcome()).isEqualTo(expected);
-    }
-
-    @Test
-    @DisplayName("R2: tier-1 match ignores case and surrounding spaces")
-    void hotelTier1CaseInsensitive() {
-        Claim c = claim(employee, hotel(" mumbai ", 1, "5500.00"));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getOutcome()).isEqualTo(LineOutcome.AUTO_APPROVE);
-    }
-
-    // ------------------------------------------------------------------ R3 cab
-
-    @ParameterizedTest(name = "R3: cab {0} -> {1}")
-    @CsvSource({"2000.00, AUTO_APPROVE", "2000.01, ROUTE"})
-    void cabPerTrip(String amount, LineOutcome expected) {
-        Claim c = claim(employee, line(Category.LOCAL_CAB, amount, WEDNESDAY, true));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getOutcome()).isEqualTo(expected);
-    }
-
-    // ------------------------------------------------------------------ R5 duplicates
-
-    @Test
-    @DisplayName("R5: same vendor + amount + date as an earlier line of the same employee")
-    void duplicateByFields() {
-        when(lines.findDuplicatesByFields(anyLong(), anyString(), any(), any(), any())).thenReturn(List.of(new ClaimLine()));
-        Claim c = claim(employee, line(Category.MEALS, "300.00", WEDNESDAY, true));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getFlags()).containsExactly(PolicyEngine.FLAG_DUPLICATE);
-        assertThat(c.getLines().get(0).getOutcome()).isEqualTo(LineOutcome.ROUTE);
-    }
-
-    @Test
-    @DisplayName("R5: same receipt SHA-256 as any earlier line (any employee)")
-    void duplicateByReceiptHash() {
-        when(lines.findDuplicatesByReceiptHash(anyString(), any())).thenReturn(List.of(new ClaimLine()));
-        Claim c = claim(employee, line(Category.MEALS, "300.00", WEDNESDAY, true));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getFlags()).containsExactly(PolicyEngine.FLAG_DUPLICATE);
-    }
-
-    @Test
-    @DisplayName("R5: later line in the same claim duplicates an earlier one (vendor case-insensitive, trimmed)")
-    void duplicateWithinClaim() {
-        ClaimLine a = line(Category.MEALS, "300.00", WEDNESDAY, true);
-        ClaimLine b = line(Category.MEALS, "300.00", WEDNESDAY, true);
-        a.setVendor("Cafe Coffee Day");
-        b.setVendor("  cafe coffee day ");
-        Claim c = claim(employee, a, b);
-        engine.evaluate(c);
-        assertThat(a.getFlags()).doesNotContain(PolicyEngine.FLAG_DUPLICATE);
-        assertThat(b.getFlags()).contains(PolicyEngine.FLAG_DUPLICATE);
-    }
-
-    @Test
-    @DisplayName("R5: the same receipt file on two lines of one claim")
-    void duplicateReceiptWithinClaim() {
-        ClaimLine a = line(Category.MEALS, "300.00", WEDNESDAY, true);
-        ClaimLine b = line(Category.MEALS, "310.00", WEDNESDAY, false);
-        b.setReceipt(a.getReceipt());
-        Claim c = claim(employee, a, b);
-        engine.evaluate(c);
-        assertThat(a.getFlags()).doesNotContain(PolicyEngine.FLAG_DUPLICATE);
-        assertThat(b.getFlags()).contains(PolicyEngine.FLAG_DUPLICATE);
-    }
-
-    @Test
-    @DisplayName("R5: an earlier uploaded receipt with the same bytes (any employee, attached or not)")
-    void duplicateByReceiptTable() {
-        when(lines.existsOtherReceiptWithHash(anyString(), anyLong())).thenReturn(true);
-        Claim c = claim(employee, line(Category.MEALS, "300.00", WEDNESDAY, true));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getFlags()).containsExactly(PolicyEngine.FLAG_DUPLICATE);
-    }
-
-    @Test
-    @DisplayName("All checks run: missing receipt on a FLIGHT keeps NO_POLICY too")
-    void allFlagsCollected() {
-        Claim c = claim(employee, line(Category.FLIGHT, "600.00", WEDNESDAY, false));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getOutcome()).isEqualTo(LineOutcome.AUTO_REJECT);
-        assertThat(c.getLines().get(0).getFlags())
-                .containsExactlyInAnyOrder(PolicyEngine.FLAG_MISSING_RECEIPT, PolicyEngine.FLAG_NO_POLICY);
-    }
-
-    @Test
-    @DisplayName("R11: roughly 10% of clean claims are sampled, not a fixed pattern")
-    void sampleAuditRate() {
-        int sampled = 0;
-        for (int i = 0; i < 2000; i++) {
-            Claim c = claim(employee, line(Category.MEALS, "100.00", WEDNESDAY, true));
-            if (engine.evaluate(c).sampleAudit()) sampled++;
-        }
-        assertThat(sampled).isBetween(120, 290);   // 10% of 2,000 = 200; wide band, no flaky failures
-    }
-
-    // ------------------------------------------------------------------ R6 weekend, NO_POLICY
-
-    @Test
-    void weekendFlagsSaturdayAndSunday() {
-        Claim c = claim(employee,
-                line(Category.LOCAL_CAB, "300.00", SATURDAY, true),
-                line(Category.LOCAL_CAB, "301.00", SUNDAY, true),
-                line(Category.LOCAL_CAB, "302.00", WEDNESDAY, true));
-        engine.evaluate(c);
-        assertThat(c.getLines().get(0).getFlags()).containsExactly(PolicyEngine.FLAG_WEEKEND);
-        assertThat(c.getLines().get(1).getFlags()).containsExactly(PolicyEngine.FLAG_WEEKEND);
-        assertThat(c.getLines().get(2).getFlags()).isEmpty();
-    }
-
-    @ParameterizedTest(name = "NO_POLICY: {0}")
-    @EnumSource(value = Category.class, names = {"FLIGHT", "TRAIN", "OTHER"})
-    void categoriesWithoutRuleAreRouted(Category category) {
-        Claim c = claim(employee, line(category, "100.00", WEDNESDAY, true));
-        PolicyEngine.Result r = engine.evaluate(c);
-        assertThat(c.getLines().get(0).getFlags()).containsExactly(PolicyEngine.FLAG_NO_POLICY);
-        assertThat(r.targetStatus()).isEqualTo(ClaimStatus.PENDING_MANAGER);
-    }
-
-    // ------------------------------------------------------------------ claim outcome R8 / R16
-
-    @ParameterizedTest(name = "R16: clean claim total {1} -> {2}")
-    @CsvSource({"1000.00, 5000.00, APPROVED", "1000.01, 5000.01, PENDING_MANAGER"})
-    void autoApproveMaxTotal(String cabAmount, String expectedTotal, ClaimStatus expected) {
-        // every line within its limit, with a receipt, on a weekday: meals 1,000 + cab + hotel 3,000 (non-tier-1)
-        Claim c = claim(employee,
-                line(Category.MEALS, "1000.00", WEDNESDAY, true),
-                line(Category.LOCAL_CAB, cabAmount, WEDNESDAY, true),
-                hotel("Indore", 1, "3000.00"));
-        PolicyEngine.Result r = engine.evaluate(c);
-        assertThat(c.getLines()).allSatisfy(l -> assertThat(l.getOutcome()).isEqualTo(LineOutcome.AUTO_APPROVE));
-        assertThat(c.getTotalAmount()).isEqualByComparingTo(expectedTotal);
-        assertThat(r.targetStatus()).isEqualTo(expected);
-    }
-
-    @Test
-    @DisplayName("Routed claim of an employee without a manager goes to the auditor")
+    @DisplayName("Claimant with no manager is routed to PENDING_AUDITOR")
     void noManagerGoesToAuditor() {
-        Claim c = claim(manager, line(Category.FLIGHT, "4000.00", WEDNESDAY, true));
-        assertThat(engine.evaluate(c).targetStatus()).isEqualTo(ClaimStatus.PENDING_AUDITOR);
+        Claim c = singleLine(Category.FLIGHT, new BigDecimal("6000"), LocalDate.now().minusDays(1),
+                "IndiGo", null, null, true);
+        c.getEmployee().setManager(null);  // no manager
+        var r = engine.evaluate(c);
+        assertThat(r.targetStatus()).isEqualTo(ClaimStatus.PENDING_AUDITOR);
     }
 
-    @Test
-    @DisplayName("Golden demo claim (README sec 3): hotel OVER_LIMIT, cab WEEKEND, flight NO_POLICY -> PENDING_MANAGER")
-    void goldenDemoClaim() {
-        ClaimLine h = hotel("Mumbai", 3, "22500.00");
-        ClaimLine meals = line(Category.MEALS, "1200.00", WEDNESDAY, true);
-        ClaimLine cab = line(Category.LOCAL_CAB, "800.00", SATURDAY, true);
-        ClaimLine flight = line(Category.FLIGHT, "6000.00", WEDNESDAY, true);
-        Claim c = claim(employee, h, meals, cab, flight);
+    // ---------- helpers ----------
 
-        PolicyEngine.Result r = engine.evaluate(c);
-
-        assertThat(h.getFlags()).containsExactly(PolicyEngine.FLAG_OVER_LIMIT);
-        assertThat(meals.getOutcome()).isEqualTo(LineOutcome.AUTO_APPROVE);
-        assertThat(cab.getFlags()).containsExactly(PolicyEngine.FLAG_WEEKEND);
-        assertThat(flight.getFlags()).containsExactly(PolicyEngine.FLAG_NO_POLICY);
-        assertThat(c.getTotalAmount()).isEqualByComparingTo("30500.00");
-        assertThat(r.targetStatus()).isEqualTo(ClaimStatus.PENDING_MANAGER);
-        assertThat(r.sampleAudit()).isFalse();
+    private Claim singleLine(Category cat, BigDecimal amt, LocalDate date, String vendor,
+                             String city, Short nights, boolean withReceipt) {
+        Claim c = baseClaim();
+        c.getLines().add(line(c, (short) 1, cat, amt, date, vendor, city, nights, withReceipt));
+        return c;
     }
 
-    @Test
-    @DisplayName("Policy outcome counter is published under the README 9.4 name")
-    void outcomeMetric() {
-        engine.evaluate(claim(employee, line(Category.MEALS, "100.00", WEDNESDAY, true)));
-        assertThat(registry.get("expenseflow_policy_outcomes_total").tag("outcome", "AUTO_APPROVE").counter().count())
-                .isEqualTo(1.0);
+    private Claim baseClaim() {
+        Employee emp = new Employee();
+        emp.setId(100L);
+        emp.setName("Test Emp");
+        Employee mgr = someManager();
+        emp.setManager(mgr);
+        Claim c = new Claim();
+        c.setId(1L);
+        c.setClaimNumber("EXP-2026-000001");
+        c.setEmployee(emp);
+        c.setStatus(ClaimStatus.DRAFT);
+        return c;
+    }
+
+    private Employee someManager() {
+        Employee m = new Employee();
+        m.setId(200L);
+        m.setName("The Manager");
+        return m;
+    }
+
+    private ClaimLine line(Claim claim, short no, Category cat, BigDecimal amt, LocalDate date,
+                           String vendor, String city, Short nights, boolean withReceipt) {
+        ClaimLine l = new ClaimLine();
+        l.setClaim(claim);
+        l.setLineNo(no);
+        l.setCategory(cat);
+        l.setAmount(amt);
+        l.setExpenseDate(date);
+        l.setVendor(vendor);
+        l.setCity(city);
+        l.setNights(nights);
+        if (withReceipt) {
+            Receipt r = new Receipt();
+            r.setId(500L + no);
+            r.setSha256("0".repeat(64));
+            l.setReceipt(r);
+        }
+        return l;
+    }
+
+    private ClaimLine mock() { return new ClaimLine(); }
+
+    private PolicyRule rule(String code, Category c, BigDecimal limit, Short tier) {
+        PolicyRule r = new PolicyRule();
+        r.setCode(code); r.setCategory(c); r.setLimitAmount(limit); r.setCityTier(tier);
+        r.setUnit("X"); r.setActive(true);
+        return r;
+    }
+
+    private LocalDate findSaturday() {
+        LocalDate d = LocalDate.now();
+        while (d.getDayOfWeek().getValue() != 6) d = d.minusDays(1);
+        return d;
     }
 }

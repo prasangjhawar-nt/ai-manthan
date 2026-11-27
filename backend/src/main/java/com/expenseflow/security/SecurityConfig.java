@@ -10,6 +10,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import com.expenseflow.filter.CorrelationIdFilter;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
+import java.io.IOException;
 
 @Configuration
 @EnableMethodSecurity
@@ -38,32 +42,33 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()
                 )
-                // FR-AUTH-3: no/invalid token -> 401 (Spring's default without a login mechanism is 403),
+                // FR-AUTH-3: no/invalid/expired token -> 401 (so the SPA can send the user back to /login),
                 // forbidden -> 403; both as RFC 9457 ProblemDetail with the correlation id
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((req, res, ex) ->
-                                writeProblem(req, res, 401, "Unauthorized", "Authentication required"))
+                                writeProblem(res, 401, "Unauthorized", "Missing or expired token", req.getRequestURI()))
                         .accessDeniedHandler((req, res, ex) ->
-                                writeProblem(req, res, 403, "Forbidden", "You are not allowed to perform this action")))
+                                writeProblem(res, 403, "Forbidden", "You are not allowed to perform this action", req.getRequestURI())))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
-    private static void writeProblem(jakarta.servlet.http.HttpServletRequest req,
-                                     jakarta.servlet.http.HttpServletResponse res,
-                                     int status, String title, String detail) throws java.io.IOException {
-        String cid = org.slf4j.MDC.get(com.expenseflow.filter.CorrelationIdFilter.MDC_KEY);
+    private static void writeProblem(HttpServletResponse res, int status, String title, String detail, String instance)
+            throws IOException {
+        String cid = MDC.get(CorrelationIdFilter.MDC_KEY);
         res.setStatus(status);
         res.setContentType("application/problem+json");
         res.setCharacterEncoding("UTF-8");
         res.getWriter().write("{\"type\":\"about:blank\",\"title\":\"" + title + "\",\"status\":" + status
-                + ",\"detail\":\"" + detail + "\",\"instance\":\"" + jsonEscape(req.getRequestURI())
-                + "\",\"correlationId\":" + (cid == null ? "null" : "\"" + jsonEscape(cid) + "\"") + "}");
+                + ",\"detail\":\"" + detail + "\",\"instance\":\"" + escape(instance) + "\""
+                + (cid == null ? "" : ",\"correlationId\":\"" + escape(cid) + "\"") + ",\"errors\":[]}");
     }
 
-    private static String jsonEscape(String s) {
-        StringBuilder b = new StringBuilder(s.length());
-        for (char c : s.toCharArray()) {
+    /** JSON string escape: quotes, backslash and control characters (the request URI is client-controlled). */
+    private static String escape(String v) {
+        if (v == null) return "";
+        StringBuilder b = new StringBuilder(v.length());
+        for (char c : v.toCharArray()) {
             if (c == '"' || c == '\\') b.append('\\').append(c);
             else if (c < 0x20) b.append(String.format("\\u%04x", (int) c));
             else b.append(c);

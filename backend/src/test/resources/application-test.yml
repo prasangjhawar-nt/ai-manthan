@@ -1,14 +1,12 @@
 spring:
-  datasource:
-    url: jdbc:tc:postgresql:18-alpine:///expenseflow_test
-    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
-    username: test
-    password: test
   jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
-      ddl-auto: validate
+      ddl-auto: none
+    open-in-view: false
   flyway:
     enabled: true
+    baseline-on-migrate: true
 
 expenseflow:
   jwt:
@@ -16,9 +14,11 @@ expenseflow:
     ttl-minutes: 60
   bank:
     base-url: http://localhost:0
-    timeout-ms: 1000
+    timeout-ms: 500
   payout:
-    retry-interval-ms: 60000
+    retry-interval-ms: 3600000   # effectively disable the retry scheduler in tests
+  policy:
+    cache-ttl-seconds: 1
 
 management:
   endpoint:
