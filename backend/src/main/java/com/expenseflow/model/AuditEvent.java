@@ -1,6 +1,7 @@
 package com.expenseflow.model;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Immutable;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -8,6 +9,7 @@ import java.time.Instant;
 import java.util.Map;
 
 @Entity
+@Immutable
 @Table(name = "audit_events")
 public class AuditEvent {
 
