@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { Api } from "@/api/endpoints"
 import { session, setUnauthorizedHandler } from "@/api/client"
 import type { Role, User } from "@/api/types"
@@ -25,9 +26,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => setUnauthorizedHandler(logout), [logout])
 
+  // Auto sign-out when the JWT expires (backend has no refresh endpoint).
+  useEffect(() => {
+    if (!user) return
+    const left = session.msLeft
+    if (left == null) return
+    const t = window.setTimeout(() => {
+      logout()
+      toast.info("Session expired", { description: "Please sign in again." })
+    }, Math.max(0, left))
+    return () => window.clearTimeout(t)
+  }, [user, logout])
+
   const login = useCallback(async (email: string, password: string) => {
     const res = await Api.login(email, password)
-    session.save(res.token, res.user)
+    session.save(res.token, res.user, res.expiresInSeconds)
     qc.clear()
     setUser(res.user)
     return res.user

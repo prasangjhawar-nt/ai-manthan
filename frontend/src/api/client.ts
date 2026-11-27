@@ -2,18 +2,32 @@ import type { ProblemDetail } from "./types"
 
 const TOKEN_KEY = "ef.token"
 const USER_KEY = "ef.user"
+const EXP_KEY = "ef.exp"
 
 export const session = {
+  /** Returns the token only while it is unexpired (JWT is 1 h; we don't refresh). */
   get token() {
     try {
-      return localStorage.getItem(TOKEN_KEY)
+      const t = localStorage.getItem(TOKEN_KEY)
+      const exp = Number(localStorage.getItem(EXP_KEY) ?? 0)
+      if (t && exp && Date.now() >= exp) {
+        session.clear()
+        return null
+      }
+      return t
     } catch {
       return null
     }
   },
-  save(token: string, user: unknown) {
+  /** ms until the token expires, or null. */
+  get msLeft() {
+    const exp = Number(localStorage.getItem(EXP_KEY) ?? 0)
+    return exp ? exp - Date.now() : null
+  },
+  save(token: string, user: unknown, expiresInSeconds = 3600) {
     localStorage.setItem(TOKEN_KEY, token)
     localStorage.setItem(USER_KEY, JSON.stringify(user))
+    localStorage.setItem(EXP_KEY, String(Date.now() + expiresInSeconds * 1000 - 5_000))
   },
   user<T>(): T | null {
     try {
@@ -26,6 +40,7 @@ export const session = {
   clear() {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
+    localStorage.removeItem(EXP_KEY)
   },
 }
 

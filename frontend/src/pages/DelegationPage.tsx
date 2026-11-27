@@ -49,7 +49,7 @@ export default function DelegationPage() {
         <Card className="stagger self-start" style={{ "--i": 0 } as React.CSSProperties}>
           <CardHeader title="New delegation" />
           <form onSubmit={handleSubmit((v) => m.mutate(v))} noValidate className="flex flex-col gap-4 p-4">
-            <Field label="Delegate employee ID" htmlFor="delegateId" error={formState.errors.delegateId?.message} hint="e.g. 21 for Vikram Nair">
+            <Field label="Delegate employee ID" htmlFor="delegateId" error={formState.errors.delegateId?.message} hint="The colleague's employee ID (shown on their profile). They can act at manager level within these dates.">
               <Input id="delegateId" type="number" inputMode="numeric" aria-invalid={!!formState.errors.delegateId} data-testid="delegate-id" {...register("delegateId", { valueAsNumber: true })} />
             </Field>
             <div className="grid grid-cols-2 gap-3">

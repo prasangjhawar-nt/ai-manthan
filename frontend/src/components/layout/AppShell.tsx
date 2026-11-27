@@ -7,20 +7,10 @@ import { ROLE_LABEL } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Avatar, Button } from "@/components/ds/primitives"
 import { Drawer } from "@/components/ds/dialog"
+import { Logo } from "@/components/ds/logo"
 import { useQueue } from "@/api/hooks"
 
-export function Logo({ className }: { className?: string }) {
-  return (
-    <div className={cn("flex items-center gap-2.5", className)}>
-      <svg viewBox="0 0 24 24" className="size-[22px] text-obsidian" aria-hidden>
-        <rect x="2" y="2" width="9" height="9" rx="2.4" fill="currentColor" />
-        <rect x="13" y="7.5" width="9" height="9" rx="2.4" fill="currentColor" opacity=".45" />
-        <rect x="2" y="13" width="9" height="9" rx="2.4" fill="currentColor" />
-      </svg>
-      <span className="text-[19px] font-semibold tracking-[-0.03em] text-ink">ExpenseFlow</span>
-    </div>
-  )
-}
+export { Logo }
 
 interface NavItem {
   to: string

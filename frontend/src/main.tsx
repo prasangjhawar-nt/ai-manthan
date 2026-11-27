@@ -7,6 +7,7 @@ import "./index.css"
 import App from "./App.tsx"
 import { AuthProvider } from "./lib/auth"
 import { ApiError } from "./api/client"
+import { TooltipProvider } from "./components/ds/tooltip"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,7 +24,9 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <App />
+          <TooltipProvider delay={120}>
+            <App />
+          </TooltipProvider>
           <Toaster
             position="bottom-right"
             gap={8}

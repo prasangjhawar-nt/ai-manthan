@@ -222,6 +222,26 @@
     line-height: 1.45;
     font-feature-settings: "ss01", "cv11";
   }
+  /* Tailwind v4 resets buttons to cursor:default — restore the pointer for everything clickable. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  [role="checkbox"],
+  [role="switch"],
+  [role="radio"],
+  [role="option"],
+  a[href],
+  summary,
+  label[for],
+  select:not(:disabled),
+  input[type="date"],
+  input[type="file"] {
+    cursor: pointer;
+  }
+  :disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
   ::selection {
     background: color-mix(in srgb, var(--cobalt) 18%, transparent);
   }

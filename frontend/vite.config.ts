@@ -1,9 +1,11 @@
 import path from "path"
-import { defineConfig } from "vite"
+import { defineConfig, loadEnv } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "")
+  return {
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -12,11 +14,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // Switch 4010 -> 8080 at minute 80 (Step 5 integration check)
+      // Real backend / nginx gateway by default. `npm run dev:prism` -> Prism on 4010, `npm run dev:mock` -> in-browser mock.
       "/api": {
-        target: "http://localhost:4010",
+        target: env.VITE_API_TARGET || "http://localhost:8080",
         changeOrigin: true,
       },
     },
   },
+}
 })

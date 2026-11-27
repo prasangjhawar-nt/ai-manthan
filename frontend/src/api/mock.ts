@@ -305,7 +305,10 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 const problem = (status: number, title: string, detail: string, instance: string, errors: ProblemDetail["errors"] = []) =>
   json(status, { type: `https://expenseflow.test/problems/${title.toLowerCase().replace(/\s+/g, "-")}`, title, status, detail, instance, correlationId: Math.random().toString(16).slice(2, 18), errors })
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const wait = (ms: number) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve())
+
+/** Tunables for tests: set latencyMs = 0 for fast runs. */
+export const mockConfig = { latencyMs: -1 }
 
 function validateLines(lines: ClaimLineInput[] | undefined, path: string) {
   const errors: { field: string; message: string }[] = []
@@ -319,7 +322,7 @@ function validateLines(lines: ClaimLineInput[] | undefined, path: string) {
 }
 
 export async function mockFetch(url: string, init: RequestInit): Promise<Response> {
-  await wait(220 + Math.random() * 260)
+  await wait(mockConfig.latencyMs >= 0 ? mockConfig.latencyMs : 220 + Math.random() * 260)
   const u = new URL(url, location.origin)
   const path = u.pathname
   const method = (init.method ?? "GET").toUpperCase()
@@ -706,6 +709,8 @@ function sendBatch(id: number, actor: User) {
 /** Dev helper: wipe and reseed the mock database. */
 export function resetMockDb() {
   sessionStorage.removeItem(STORE_KEY)
+  blobs.clear()
+  inflight.clear()
   db = seed()
 }
 

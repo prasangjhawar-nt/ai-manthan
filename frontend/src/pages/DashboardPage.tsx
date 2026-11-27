@@ -98,7 +98,7 @@ function SpendOverTime({ months, totalPaid }: { months: DashboardSummary["spendB
 
   return (
     <Card className="stagger overflow-hidden" style={{ "--i": 2 } as React.CSSProperties}>
-      <CardHeader title="Approved spend over time" action={<span className="text-[12px] text-ink-3">Approved · in payout · paid</span>} />
+      <CardHeader title="Approved spend over time" action={<span className="hidden text-[12px] text-ink-3 sm:inline">Approved · in payout · paid</span>} />
       <div className="flex flex-wrap items-end justify-between gap-4 px-4 pt-4">
         <div>
           <p className="text-[12px] text-ink-3">Spend in period</p>

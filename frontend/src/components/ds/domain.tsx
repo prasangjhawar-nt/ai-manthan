@@ -5,6 +5,7 @@ import { ApiError } from "@/api/client"
 import { cn } from "@/lib/utils"
 import { CATEGORY_COLOR, CATEGORY_LABEL, FLAG_LABEL, FLAG_TONE, OUTCOME_LABEL, OUTCOME_TONE, STATUS_LABEL, STATUS_TONE, money } from "@/lib/format"
 import { Badge, Button, Chip } from "./primitives"
+import { Tooltip } from "./tooltip"
 
 /* ------------------------------------------------------------------ Status */
 export function StatusBadge({ status, className }: { status: ClaimStatus; className?: string }) {
@@ -37,7 +38,30 @@ export function FlagList({ flags, max = 3 }: { flags: Flag[]; max?: number }) {
       {flags.slice(0, max).map((f) => (
         <FlagChip key={f} flag={f} />
       ))}
-      {flags.length > max && <Chip>+{flags.length - max}</Chip>}
+      {flags.length > max && (
+        <Tooltip
+          content={
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[11px] font-medium tracking-[0.04em] text-ink-3 uppercase">{flags.length - max} more flag{flags.length - max > 1 ? "s" : ""}</p>
+              <div className="flex flex-wrap gap-1">
+                {flags.slice(max).map((f) => (
+                  <FlagChip key={f} flag={f} />
+                ))}
+              </div>
+            </div>
+          }
+        >
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`${flags.length - max} more: ${flags.slice(max).map((f) => FLAG_LABEL[f]).join(", ")}`}
+            className="inline-flex h-[22px] items-center rounded-chip bg-surface-3 px-1.5 text-[11.5px] font-medium text-ink-2 transition-colors hover:bg-ink hover:text-white focus-visible:bg-ink focus-visible:text-white"
+            data-testid="flags-more"
+          >
+            +{flags.length - max}
+          </button>
+        </Tooltip>
+      )}
     </div>
   )
 }

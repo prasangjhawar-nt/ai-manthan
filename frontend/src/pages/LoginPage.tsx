@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { toast } from "sonner"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -36,6 +37,13 @@ export default function LoginPage() {
     setServerError(null)
     try {
       const user = await login(v.email, v.password)
+      // A static mock (Prism) ignores the email and always returns the same example user.
+      if (user.email.toLowerCase() !== v.email.trim().toLowerCase()) {
+        toast.warning(`Signed in as ${user.name}, not ${v.email}`, {
+          description: "The API is a static mock (Prism) that always returns one example user. Use `npm run dev:mock` or the real backend to switch personas.",
+          duration: 10000,
+        })
+      }
       const from = (loc.state as { from?: string } | null)?.from
       nav(from && from !== "/" ? from : homeFor(user.role), { replace: true })
     } catch (e) {

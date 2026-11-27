@@ -54,7 +54,7 @@ export function CardHeader({ title, action, className, sub }: { title: ReactNode
     <header className={cn("flex min-h-12 items-center justify-between gap-3 border-b border-line px-4 py-2.5", className)}>
       <div className="min-w-0">
         <h2 className="eyebrow truncate">{title}</h2>
-        {sub && <p className="mt-0.5 truncate text-xs text-ink-3">{sub}</p>}
+        {sub && <p className="mt-0.5 line-clamp-2 text-xs text-ink-3 sm:truncate">{sub}</p>}
       </div>
       {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
     </header>
@@ -203,27 +203,30 @@ export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-ink-3">{children}</kbd>
 }
 
-/** Animated number that eases toward its target — used on KPIs and totals. */
+/** Animated number that eases toward its target — used on KPIs and totals.
+ *  Interruptions (value changes mid-animation) continue from the number currently shown. */
 export function CountUp({ value, format = (n) => String(Math.round(n)), duration = 700 }: { value: number; format?: (n: number) => string; duration?: number }) {
   const [shown, setShown] = useState(value)
-  const from = useRef(value)
+  const current = useRef(value)
   const first = useRef(true)
   useEffect(() => {
-    const start = first.current ? 0 : from.current
+    const start = first.current ? 0 : current.current
     first.current = false
-    if (start === value || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    if (start === value || reduce || !Number.isFinite(value)) {
+      current.current = value
       setShown(value)
-      from.current = value
       return
     }
     let raf = 0
-    const t0 = performance.now()
+    let t0: number | null = null
     const tick = (t: number) => {
-      const p = Math.min(1, (t - t0) / duration)
-      const e = 1 - Math.pow(1 - p, 4)
-      setShown(start + (value - start) * e)
+      t0 ??= t // first frame defines the start, so frame timestamps never run "backwards"
+      const p = Math.min(1, Math.max(0, (t - t0) / duration))
+      const v = start + (value - start) * (1 - Math.pow(1 - p, 4))
+      current.current = v
+      setShown(v)
       if (p < 1) raf = requestAnimationFrame(tick)
-      else from.current = value
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)

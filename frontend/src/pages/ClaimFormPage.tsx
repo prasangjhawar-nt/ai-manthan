@@ -1,92 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useFieldArray, useForm, useWatch, type Control, type UseFormRegister, type FieldErrors, type UseFormSetValue } from "react-hook-form"
+import { Controller, useFieldArray, useForm, useWatch, type Control, type UseFormRegister, type FieldErrors, type UseFormSetValue } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { z } from "zod"
 import { useNavigate, useParams, Link } from "react-router-dom"
 import { toast } from "sonner"
 import { ArrowLeft, Camera, CheckCircle2, FileUp, Loader2, Paperclip, Plus, Trash2, AlertTriangle, Route, Send } from "lucide-react"
-import type { Category, ClaimLineInput, Flag, PolicyConfig } from "@/api/types"
+import type { Category, PolicyConfig } from "@/api/types"
 import { CATEGORIES } from "@/api/types"
 import { Api } from "@/api/endpoints"
 import { ApiError, newIdempotencyKey } from "@/api/client"
 import { useClaim, useInvalidateClaims, usePolicy, toastError } from "@/api/hooks"
 import { Button, CountUp, Field, Input, Skeleton } from "@/components/ds/primitives"
 import { CategoryGlyph, ErrorState, FlagChip, PageHeader } from "@/components/ds/domain"
-import { CATEGORY_COLOR, CATEGORY_LABEL, STATUS_LABEL, money } from "@/lib/format"
+import { CATEGORY_COLOR, CATEGORY_LABEL, STATUS_LABEL, money, money0 } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { claimSchema as schema, hotelLimit, localDaysAgo, localToday, predictRoute, previewLine, type ClaimFormValues as FormValues, type RouteInfo, type LinePreview } from "@/lib/claim-rules"
+import { CityCombobox } from "@/components/ds/combobox"
 
-const today = () => new Date().toISOString().slice(0, 10)
-const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10)
+const NO_PREVIEW: LinePreview = { flags: [], notes: [], reject: false }
 
-const lineSchema = z
-  .object({
-    category: z.enum(["MEALS", "HOTEL", "LOCAL_CAB", "FLIGHT", "TRAIN", "OTHER"]),
-    expenseDate: z.string().min(1, "Pick a date").refine((d) => d <= today(), "Can't be in the future").refine((d) => d >= daysAgo(90), "Older than 90 days"),
-    amount: z.number({ error: "Enter an amount" }).positive("Must be more than 0").max(1_000_000, "Max 10,00,000"),
-    vendor: z.string().trim().min(1, "Who did you pay?").max(120),
-    city: z.string().trim().max(80).optional().nullable(),
-    nights: z.number().int().min(1).max(30).optional().nullable(),
-    description: z.string().max(500).optional().nullable(),
-    receiptId: z.number().optional().nullable(),
-  })
-  .superRefine((l, ctx) => {
-    if (l.category === "HOTEL") {
-      if (!l.city) ctx.addIssue({ code: "custom", path: ["city"], message: "City is required for hotels" })
-      if (!l.nights) ctx.addIssue({ code: "custom", path: ["nights"], message: "Nights required" })
-    }
-  })
-const schema = z.object({ title: z.string().trim().min(1, "Give the claim a short title").max(120), lines: z.array(lineSchema).min(1).max(20) })
-type FormValues = z.infer<typeof schema>
-
-const blankLine = (category: Category = "MEALS"): FormValues["lines"][number] => ({ category, expenseDate: today(), amount: undefined as unknown as number, vendor: "", city: "", nights: null, description: "", receiptId: null })
-
-/* ----------------------------------------------------------- client-side policy preview (server is the authority) */
-function previewLine(l: Partial<ClaimLineInput>, policy: PolicyConfig | undefined, mealsOnDay: number): { flags: Flag[]; notes: string[]; reject: boolean } {
-  const flags: Flag[] = []
-  const notes: string[] = []
-  if (!l.amount || !policy) return { flags, notes, reject: false }
-  const setting = (k: string, d: number) => Number(policy.settings.find((s) => s.key === k)?.value ?? d)
-  const receiptAbove = setting("receipt.required.above", 500)
-  let reject = false
-  if (l.amount > receiptAbove && !l.receiptId) {
-    flags.push("MISSING_RECEIPT")
-    notes.push(`Receipt needed above ₹${receiptAbove}`)
-    reject = true
-  }
-  const rule = (code: string) => policy.rules.find((r) => r.code === code && r.active)
-  if (l.category === "HOTEL") {
-    const tier1 = policy.tier1Cities.some((c) => c.toLowerCase() === (l.city ?? "").trim().toLowerCase())
-    const r = policy.rules.find((x) => x.category === "HOTEL" && x.cityTier === (tier1 ? 1 : 2))
-    const per = l.amount / Math.max(1, l.nights ?? 1)
-    if (r && per > r.limitAmount) {
-      flags.push("OVER_LIMIT")
-      notes.push(`₹${money(per)}/night is over the ${tier1 ? "tier-1 " : ""}limit of ₹${money(r.limitAmount)}`)
-    }
-  } else if (l.category === "MEALS") {
-    const r = rule("MEAL_DAILY")
-    if (r && mealsOnDay > r.limitAmount) {
-      flags.push("OVER_LIMIT")
-      notes.push(`Meals that day total ₹${money(mealsOnDay)} — limit ₹${money(r.limitAmount)}`)
-    }
-  } else if (l.category === "LOCAL_CAB") {
-    const r = rule("CAB_TRIP")
-    if (r && l.amount > r.limitAmount) {
-      flags.push("OVER_LIMIT")
-      notes.push(`Over the ₹${money(r.limitAmount)} per-trip limit`)
-    }
-  } else {
-    flags.push("NO_POLICY")
-    notes.push(`${CATEGORY_LABEL[l.category as Category]} always gets a manager review`)
-  }
-  if (l.expenseDate) {
-    const d = new Date(l.expenseDate + "T00:00:00").getDay()
-    if (d === 0 || d === 6) {
-      flags.push("WEEKEND")
-      notes.push("Weekend expense — your manager will check it")
-    }
-  }
-  return { flags, notes, reject }
-}
+const blankLine = (category: Category = "MEALS"): FormValues["lines"][number] => ({ category, expenseDate: localToday(), amount: undefined as unknown as number, vendor: "", city: "", nights: null, description: "", receiptId: null })
 
 export default function ClaimFormPage() {
   const { id } = useParams()
@@ -247,8 +179,9 @@ function ClaimForm({ claim, policy }: { claim?: import("@/api/types").Claim; pol
               register={register}
               setValue={setValue}
               errors={formState.errors}
-              preview={previews[i]}
+              preview={previews[i] ?? NO_PREVIEW}
               tier1={policy?.tier1Cities ?? []}
+              limits={{ t1: hotelLimit(1, policy), other: hotelLimit(2, policy) }}
               onRemove={fields.length > 1 ? () => remove(i) : undefined}
             />
           ))}
@@ -283,10 +216,10 @@ function ClaimForm({ claim, policy }: { claim?: import("@/api/types").Claim; pol
             </div>
           </div>
           <div className="mt-3 flex gap-2 lg:mt-0 lg:flex-col lg:border-t lg:border-line lg:p-4">
-            <Button type="submit" variant="primary" size="lg" className="flex-1" loading={busy === "submit"} disabled={!!busy} data-testid="submit-claim">
+            <Button type="submit" variant="primary" size="lg" className="flex-1 lg:w-full lg:flex-none" loading={busy === "submit"} disabled={!!busy} data-testid="submit-claim">
               <Send /> Submit claim
             </Button>
-            <Button size="lg" onClick={guarded(onDraft)} loading={busy === "draft"} disabled={!!busy} data-testid="save-draft">
+            <Button size="lg" className="lg:w-full" onClick={guarded(onDraft)} loading={busy === "draft"} disabled={!!busy} data-testid="save-draft">
               Save draft
             </Button>
           </div>
@@ -300,20 +233,8 @@ function scrollToError() {
   requestAnimationFrame(() => document.querySelector("[aria-invalid=true]")?.scrollIntoView({ behavior: "smooth", block: "center" }))
 }
 
-type RouteInfo = { label: string; steps: string[]; tone: "positive" | "warning" | "danger"; detail: string }
-function predictRoute(total: number, previews: ReturnType<typeof previewLine>[], policy?: PolicyConfig): RouteInfo {
-  const s = (k: string, d: number) => Number(policy?.settings.find((x) => x.key === k)?.value ?? d)
-  if (previews.some((p) => p.reject)) return { label: "Will be rejected", steps: [], tone: "danger", detail: "A line over ₹500 has no receipt. Attach it to avoid an automatic rejection." }
-  const clean = previews.every((p) => p.flags.length === 0)
-  if (clean && total > 0 && total <= s("auto_approve.max_total", 5000)) return { label: "Auto-approves", steps: [], tone: "positive", detail: "Every line is within policy and the total is small — no approver needed." }
-  const steps = ["Manager"]
-  if (total > s("approval.auditor.above", 25000)) steps.push("Auditor")
-  if (total > s("approval.head.above", 100000)) steps.push("Finance head")
-  return { label: `${steps.length}-step review`, steps, tone: "warning", detail: clean ? "Total is above the auto-approve limit." : "Some lines are flagged for a human look." }
-}
-
 function RouteHint({ route, compact }: { route: RouteInfo; compact?: boolean }) {
-  const color = { positive: "text-positive", warning: "text-warning", danger: "text-danger" }[route.tone]
+  const color = { neutral: "text-ink-3", positive: "text-positive", warning: "text-warning", danger: "text-danger" }[route.tone]
   if (compact)
     return (
       <span className={cn("flex items-center gap-1 text-[12px] font-medium lg:hidden", color)}>
@@ -349,6 +270,7 @@ function LineCard({
   errors,
   preview,
   tier1,
+  limits,
   onRemove,
 }: {
   index: number
@@ -356,15 +278,15 @@ function LineCard({
   register: UseFormRegister<FormValues>
   setValue: UseFormSetValue<FormValues>
   errors: FieldErrors<FormValues>
-  preview: ReturnType<typeof previewLine>
+  preview: LinePreview
   tier1: string[]
+  limits: { t1?: number; other?: number }
   onRemove?: () => void
 }) {
   const category = useWatch({ control, name: `lines.${index}.category` })
   const receiptId = useWatch({ control, name: `lines.${index}.receiptId` })
   const e = errors.lines?.[index]
   const p = `lines.${index}` as const
-  const listId = `cities-${index}`
 
   return (
     <div className="animate-rise rounded-card border border-line bg-surface transition-shadow duration-200 focus-within:shadow-md" data-testid={`line-${index}`}>
@@ -382,7 +304,7 @@ function LineCard({
 
       <div className="flex flex-col gap-4 p-4">
         {/* Category picker */}
-        <div role="radiogroup" aria-label="Category" className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
+        <div role="radiogroup" aria-label="Category" className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap">
           {CATEGORIES.map((c) => {
             const on = c === category
             return (
@@ -393,7 +315,7 @@ function LineCard({
                 aria-checked={on}
                 onClick={() => setValue(`${p}.category`, c, { shouldValidate: true, shouldDirty: true })}
                 className={cn(
-                  "flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] border px-3 text-[13px] transition-all duration-150",
+                  "flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] border px-2 text-[12.5px] sm:text-[13px] transition-all duration-150 sm:justify-start sm:px-3",
                   on ? "border-transparent text-white shadow-sm" : "border-line bg-surface text-ink-2 hover:border-line-strong hover:bg-surface-2",
                 )}
                 style={on ? { background: CATEGORY_COLOR[c] } : undefined}
@@ -411,14 +333,30 @@ function LineCard({
             <Input id={`${p}.amount`} type="number" inputMode="decimal" step="0.01" min="0" placeholder="0.00" className="num" aria-invalid={!!e?.amount} data-testid={`line-${index}-amount`} {...register(`${p}.amount`, { valueAsNumber: true })} />
           </Field>
           <Field label="Date" htmlFor={`${p}.expenseDate`} error={e?.expenseDate?.message}>
-            <Input id={`${p}.expenseDate`} type="date" max={today()} min={daysAgo(90)} aria-invalid={!!e?.expenseDate} data-testid={`line-${index}-date`} {...register(`${p}.expenseDate`)} />
+            <Input id={`${p}.expenseDate`} type="date" max={localToday()} min={localDaysAgo(90)} aria-invalid={!!e?.expenseDate} data-testid={`line-${index}-date`} {...register(`${p}.expenseDate`)} />
           </Field>
           <Field label="Vendor" htmlFor={`${p}.vendor`} error={e?.vendor?.message} className="col-span-2">
             <Input id={`${p}.vendor`} placeholder="Hotel, airline, restaurant…" aria-invalid={!!e?.vendor} data-testid={`line-${index}-vendor`} {...register(`${p}.vendor`)} />
           </Field>
           <Field label="City" htmlFor={`${p}.city`} error={e?.city?.message} optional={category !== "HOTEL"} className={category === "HOTEL" ? "col-span-1 sm:col-span-2" : "col-span-2"}>
-            <Input id={`${p}.city`} list={listId} placeholder="Mumbai" aria-invalid={!!e?.city} data-testid={`line-${index}-city`} {...register(`${p}.city`)} />
-            <datalist id={listId}>{tier1.map((c) => <option key={c} value={c} />)}</datalist>
+            <Controller
+              control={control}
+              name={`${p}.city`}
+              render={({ field }) => (
+                <CityCombobox
+                  id={`${p}.city`}
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  cities={tier1}
+                  invalid={!!e?.city}
+                  placeholder="City"
+                  tier1Hint={category === "HOTEL" && limits.t1 ? `₹${money0(limits.t1)}/night` : undefined}
+                  otherHint={category === "HOTEL" && limits.other ? `₹${money0(limits.other)}/night` : undefined}
+                  testId={`line-${index}-city`}
+                />
+              )}
+            />
           </Field>
           {category === "HOTEL" && (
             <Field label="Nights" htmlFor={`${p}.nights`} error={e?.nights?.message} className="animate-fade">
