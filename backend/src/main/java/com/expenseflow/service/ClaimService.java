@@ -20,6 +20,8 @@ import com.expenseflow.repository.ApprovalStepRepository;
 import com.expenseflow.repository.ClaimRepository;
 import com.expenseflow.repository.ReceiptRepository;
 import com.expenseflow.security.CurrentUser;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -36,6 +38,9 @@ import java.util.Optional;
 
 @Service
 public class ClaimService {
+
+    @PersistenceContext
+    private EntityManager em;
 
     private final ClaimRepository claims;
     private final ReceiptRepository receipts;
@@ -103,6 +108,7 @@ public class ClaimService {
         }
         c.setTitle(req.title());
         c.getLines().clear();
+        em.flush(); // force orphan deletes before new line inserts (unique(claim_id,line_no))
         applyLines(c, req.lines());
         Claim saved = claims.save(c);
 

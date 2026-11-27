@@ -27,8 +27,7 @@ public class Receipt {
     @Column(nullable = false, length = 64)
     private String sha256;
 
-    @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "bytea")
     private byte[] data;
 
     @Column(name = "uploaded_at", nullable = false, updatable = false, insertable = false)

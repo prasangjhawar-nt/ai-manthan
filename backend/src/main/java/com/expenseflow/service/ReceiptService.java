@@ -58,6 +58,7 @@ public class ReceiptService {
         }
         String sha = sha256(data);
 
+        // Check duplicate BEFORE saving so we don't match the new row against itself.
         Long duplicateOf = repo.findFirstBySha256OrderByIdAsc(sha).map(Receipt::getId).orElse(null);
 
         Receipt r = new Receipt();
