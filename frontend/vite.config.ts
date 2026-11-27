@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => {
     },
   },
   server: {
+    // Playwright writes traces/videos under e2e/ — don't let them trigger page reloads mid-test.
+    watch: { ignored: ["**/e2e/**", "**/coverage/**"] },
     proxy: {
       // Real backend / nginx gateway by default. `npm run dev:prism` -> Prism on 4010, `npm run dev:mock` -> in-browser mock.
       "/api": {

@@ -4,11 +4,12 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useLocation, useNavigate } from "react-router-dom"
-import { ArrowRight, Eye, EyeOff, ShieldCheck, Sparkles } from "lucide-react"
+import { ArrowRight, Eye, EyeOff, Sparkles } from "lucide-react"
 import { homeFor, useAuth } from "@/lib/auth"
 import { ApiError } from "@/api/client"
 import { Button, Field, Input } from "@/components/ds/primitives"
 import { Logo } from "@/components/layout/AppShell"
+import { ThemeSwitch } from "@/lib/theme"
 import { StatusBadge, FlagChip, Amount } from "@/components/ds/domain"
 import { cn } from "@/lib/utils"
 
@@ -63,7 +64,10 @@ export default function LoginPage() {
     <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
       {/* Form */}
       <div className="flex flex-col px-6 py-8 sm:px-12">
-        <Logo />
+        <div className="flex items-center justify-between">
+          <Logo />
+          <ThemeSwitch className="w-[108px]" />
+        </div>
         <div className="mx-auto flex w-full max-w-[380px] flex-1 flex-col justify-center py-10">
           <div className="stagger" style={{ "--i": 0 } as React.CSSProperties}>
             <h1 className="text-[28px] leading-tight font-semibold tracking-[-0.03em]">Welcome back</h1>
@@ -93,6 +97,9 @@ export default function LoginPage() {
               Sign in <ArrowRight />
             </Button>
           </form>
+          <p className="mt-4 text-center text-[12.5px] text-ink-3" data-testid="login-register-hint">
+            New to ExpenseFlow? Accounts are registered by your finance head — ask them for your sign-in email and one-time password.
+          </p>
 
           <div className="stagger mt-8" style={{ "--i": 2 } as React.CSSProperties}>
             <div className="flex items-center gap-3 text-[11.5px] tracking-[0.06em] text-ink-4 uppercase">
@@ -114,15 +121,12 @@ export default function LoginPage() {
             </div>
           </div>
         </div>
-        <p className="flex items-center gap-1.5 text-[12px] text-ink-4">
-          <ShieldCheck className="size-3.5" /> Synthetic demo data only · Team 45 · AI Manthan 2026
-        </p>
       </div>
 
       {/* Showcase */}
       <div className="relative hidden overflow-hidden p-3 lg:block">
-        <div className="relative flex h-full flex-col justify-between overflow-hidden rounded-[24px] bg-obsidian p-10 text-white">
-          <div className="pointer-events-none absolute inset-0 opacity-[0.07]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "22px 22px" }} />
+        <div className="relative flex h-full flex-col justify-between overflow-hidden hero-panel rounded-[24px] p-10 text-white ring-1 ring-white/10">
+          <div className="pointer-events-none absolute inset-0 opacity-[0.09]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "22px 22px" }} />
           <div className="relative">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[12px] text-white/80">
               <Sparkles className="size-3.5" /> Policy engine checks every line
@@ -179,7 +183,7 @@ export default function LoginPage() {
 
 function FloatCard({ children, className, delay }: { children: React.ReactNode; className?: string; delay: number }) {
   return (
-    <div className={cn("stagger rounded-[16px] bg-surface p-4 text-ink shadow-lg", className)} style={{ "--i": 3 + delay * 2 } as React.CSSProperties}>
+    <div className={cn("glass stagger rounded-[16px] border p-4 text-ink shadow-lg", className)} style={{ "--i": 3 + delay * 2 } as React.CSSProperties}>
       {children}
     </div>
   )

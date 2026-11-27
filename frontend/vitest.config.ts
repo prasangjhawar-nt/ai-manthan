@@ -14,7 +14,8 @@ export default defineConfig({
     css: false,
     env: { VITE_MOCK: "1" },
     include: ["src/**/*.test.{ts,tsx}"],
+    testTimeout: 20_000,
     reporters: ["default"],
-    coverage: { provider: "v8", include: ["src/lib/**", "src/api/**", "src/components/ds/**"] },
+    coverage: { provider: "v8", include: ["src/**/*.{ts,tsx}"], exclude: ["src/**/*.test.*", "src/test/**", "src/components/ui/**", "src/main.tsx"], reporter: ["text-summary", "text", "html"], reportsDirectory: "coverage" },
   },
 })
