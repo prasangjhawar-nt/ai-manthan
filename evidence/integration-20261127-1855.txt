@@ -1,0 +1,66 @@
+== Gateway (http://localhost:8080)
+PASS  gateway /healthz
+PASS  frontend served at /
+PASS  SPA fallback for deep link /claims/12345
+PASS  /actuator not routed
+PASS  /actuator/prometheus not routed
+PASS  security header X-Content-Type-Options
+PASS  security header X-Frame-Options
+PASS  security header Content-Security-Policy
+PASS  security header Referrer-Policy
+PASS  X-Request-ID on every response
+PASS  client X-Request-ID is kept
+PASS  nginx version hidden
+PASS  Swagger UI at /api/swagger-ui.html
+PASS  OpenAPI document
+== Auth and access (R13, R15)
+PASS  no token -> 401
+PASS  wrong password -> 401
+PASS  no stack trace in errors
+PASS  login EMPLOYEE
+PASS  login colleague
+PASS  login MANAGER
+PASS  login AUDITOR
+PASS  login HEAD
+PASS  GET /api/me
+PASS  EMPLOYEE -> approver queue 403
+PASS  EMPLOYEE -> dashboard 403
+PASS  MANAGER -> payouts 403
+PASS  MANAGER queue
+PASS  HEAD dashboard
+PASS  EMPLOYEE opens colleague's claim -> 404 (R13)
+PASS  ...and its audit timeline -> 404
+PASS  MANAGER approves own claim -> 403 (R15)
+== Claim flow: create, idempotent submit, approve, pay (R12)
+PASS  create draft
+PASS  submit
+PASS  same Idempotency-Key -> same response
+PASS  TRAIN line (no policy) routed -> PENDING_MANAGER
+PASS  employee cannot approve
+PASS  manager approves
+PASS  total <= 25,000 -> APPROVED (R9)
+PASS  approve twice -> 409
+PASS  HEAD creates payout batch
+PASS  bank accepted -> batch SENT
+PASS  claim PAID only after bank accepted (R12)
+PASS  download payout CSV
+PASS  CSV header
+PASS  audit timeline
+PASS  audit has 7 events (create, submit, policy, approve, paid)
+== Edit, validation, errors, delegation, queues
+PASS  edit draft (replace lines) – FR-CLM-5
+PASS  edit returns the new version
+PASS  stale version -> 409
+PASS  invalid body -> 400
+PASS  400 has errors[] and correlationId
+PASS  page=-1 -> 400 (not 500)
+PASS  page=abc -> 400
+PASS  framework 400 has correlationId
+PASS  duplicate claimIds in a payout -> 400
+PASS  exactly one X-Request-ID header on /api
+PASS  active delegate (mgr.demo for mgr.leave) can open the claim – R10
+PASS  HEAD queue shows claims where HEAD is the manager
+PASS  auditor queue hides own claims
+== Rate limit (last: it throttles this IP for a minute)
+PASS  login rate limit -> 429
+== Result: 60 passed, 0 failed

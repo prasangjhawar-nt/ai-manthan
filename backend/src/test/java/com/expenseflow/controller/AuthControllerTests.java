@@ -59,10 +59,10 @@ class AuthControllerTests extends AbstractIntegrationTest {
                 .andExpect(status().isBadRequest());
     }
 
-    @Test @DisplayName("GET /api/me without token -> 403 (chain blocks the request)")
+    @Test @DisplayName("GET /api/me without token -> 401 (FR-AUTH-3)")
     void meNoToken() throws Exception {
         mvc.perform(get("/api/me"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test @DisplayName("GET /api/me with valid token -> 200 profile")

@@ -20,32 +20,32 @@ class SecurityTests extends AbstractIntegrationTest {
 
     // ---------- JWT ----------
 
-    @Test @DisplayName("JWT — missing Authorization header -> 403")
+    @Test @DisplayName("JWT — missing Authorization header -> 401 (FR-AUTH-3)")
     void noToken() throws Exception {
-        mvc.perform(get("/api/me")).andExpect(status().isForbidden());
+        mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
     }
 
-    @Test @DisplayName("JWT — garbage token -> 403 (not accepted)")
+    @Test @DisplayName("JWT — garbage token -> 401 (FR-AUTH-3) (not accepted)")
     void garbageToken() throws Exception {
         mvc.perform(get("/api/me").header("Authorization", "Bearer not-a-real-jwt"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
-    @Test @DisplayName("JWT — tampered signature -> 403")
+    @Test @DisplayName("JWT — tampered signature -> 401 (FR-AUTH-3)")
     void tamperedSignature() throws Exception {
         String good = tokens.emp().substring(7);  // strip 'Bearer '
         // flip the last byte of the signature segment
         int lastDot = good.lastIndexOf('.');
         String tampered = good.substring(0, lastDot + 1) + "A" + good.substring(lastDot + 2);
         mvc.perform(get("/api/me").header("Authorization", "Bearer " + tampered))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
-    @Test @DisplayName("JWT — missing Bearer prefix -> 403")
+    @Test @DisplayName("JWT — missing Bearer prefix -> 401 (FR-AUTH-3)")
     void missingBearerPrefix() throws Exception {
         String good = tokens.emp().substring(7);
         mvc.perform(get("/api/me").header("Authorization", good))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     // ---------- RBAC ----------

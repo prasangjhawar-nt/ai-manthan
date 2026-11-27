@@ -294,7 +294,7 @@ class PolicyEngineTest {
         if (withReceipt) {
             Receipt r = new Receipt();
             r.setId(500L + no);
-            r.setSha256("0".repeat(64));
+            r.setSha256(String.format("%064x", 500L + no)); // distinct receipt per line (same hash = R5 duplicate)
             l.setReceipt(r);
         }
         return l;
