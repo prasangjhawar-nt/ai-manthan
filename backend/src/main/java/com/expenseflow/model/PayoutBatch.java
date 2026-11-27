@@ -87,4 +87,11 @@ public class PayoutBatch {
 
     public Instant getSentAt() { return sentAt; }
     public void setSentAt(Instant sentAt) { this.sentAt = sentAt; }
+
+    /** Earliest time the retry job may resend this batch (V3, devops.md 6.4). Null = due now. */
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
+    public Instant getNextAttemptAt() { return nextAttemptAt; }
+    public void setNextAttemptAt(Instant nextAttemptAt) { this.nextAttemptAt = nextAttemptAt; }
 }

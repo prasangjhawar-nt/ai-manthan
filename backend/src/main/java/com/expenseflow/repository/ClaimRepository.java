@@ -23,6 +23,11 @@ public interface ClaimRepository extends JpaRepository<Claim, Long>, org.springf
 
     Page<Claim> findByEmployeeId(Long employeeId, Pageable pageable);
 
+    /** Row lock for payout selection: a claim can be put into only one batch (R12). */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from Claim c where c.id = :id")
+    Optional<Claim> findByIdForUpdate(@Param("id") Long id);
+
     Page<Claim> findByEmployeeIdAndStatus(Long employeeId, ClaimStatus status, Pageable pageable);
 
     @Query("""

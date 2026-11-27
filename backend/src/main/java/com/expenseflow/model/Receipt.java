@@ -27,7 +27,7 @@ public class Receipt {
     @Column(nullable = false, length = 64)
     private String sha256;
 
-    @Lob
+    // BYTEA, not @Lob: on PostgreSQL @Lob means a large-object OID, which does not match the bytea column
     @Column(nullable = false)
     private byte[] data;
 

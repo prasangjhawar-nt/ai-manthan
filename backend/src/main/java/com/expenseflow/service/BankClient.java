@@ -32,9 +32,13 @@ public class BankClient {
         var httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(timeoutMs))
                 .build();
+        // FR-PAY-3: the whole call (connect AND response) is bounded by BANK_TIMEOUT_MS; a hanging bank must
+        // never hold the batch row lock, a DB connection or the scheduler thread
+        var factory = new org.springframework.http.client.JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(Duration.ofMillis(timeoutMs));
         this.client = RestClient.builder()
                 .baseUrl(baseUrl)
-                .requestFactory(new org.springframework.http.client.JdkClientHttpRequestFactory(httpClient))
+                .requestFactory(factory)
                 .build();
         this.okTimer = Timer.builder("expenseflow_bank_call_seconds")
                 .tag("outcome", "SUCCESS").register(registry);

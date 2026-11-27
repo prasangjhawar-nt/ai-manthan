@@ -25,7 +25,9 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         String id = request.getHeader(HEADER);
-        if (id == null || id.isBlank()) {
+        // keep the client's / gateway's id only if it is short and safe: it ends up in logs and in
+        // audit_events.correlation_id VARCHAR(64) (a long value would make every audited write fail)
+        if (id == null || !id.matches("[A-Za-z0-9._:-]{1,64}")) {
             id = UUID.randomUUID().toString();
         }
         MDC.put(MDC_KEY, id);

@@ -65,6 +65,33 @@ public class IdempotencyService {
         }
     }
 
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager em;
+
+    /**
+     * Serialises requests with the same (user, Idempotency-Key) across replicas until the current transaction
+     * ends: a parallel duplicate (double click) waits, then finds the stored key and gets the same response
+     * instead of a 409 (FR-CLM-7). Must be called inside a transaction, before findExisting().
+     */
+    public void acquire(String key, Long userId) {
+        em.createNativeQuery("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))")
+                .setParameter("k", userId + ":" + key)
+                .getSingleResult();
+    }
+
+    /** Replace the stored response (payout: the final state after the bank call is what a replay returns). */
+    @Transactional
+    public <T> void updateResponse(String key, Long userId, T responseBody) {
+        repo.findByIdemKeyAndUserId(key, userId).ifPresent(row -> {
+            try {
+                row.setResponseBody(mapper.writeValueAsString(responseBody));
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException("Could not store idempotent response", e);
+            }
+            repo.save(row);
+        });
+    }
+
     public Optional<IdempotencyKey> findExisting(String key, Long userId) {
         return repo.findByIdemKeyAndUserId(key, userId);
     }
@@ -91,14 +118,21 @@ public class IdempotencyService {
         row.setRequestHash(requestHash);
         row.setResponseStatus(status);
         if (responseBody != null) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> asMap = mapper.convertValue(responseBody, Map.class);
-            row.setResponseBody(asMap);
+            try {
+                row.setResponseBody(mapper.writeValueAsString(responseBody));
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException("Could not store idempotent response", e);
+            }
         }
         repo.save(row);
     }
 
+    /** Same response as the first call: exact decimals (420.00) and timestamps, parsed from the stored JSON text. */
     public <T> T decode(IdempotencyKey existing, Class<T> type) {
-        return mapper.convertValue(existing.getResponseBody(), type);
+        try {
+            return existing.getResponseBody() == null ? null : mapper.readValue(existing.getResponseBody(), type);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Stored idempotent response is unreadable", e);
+        }
     }
 }

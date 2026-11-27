@@ -1,0 +1,13 @@
+# Debug ports for local runs. Internal networks can't publish ports, so these services also join `edge`.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres migrate wiremock   # backend dev on the host
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait            # full stack + debug ports
+services:
+  postgres:
+    ports: ["${DEV_PG_PORT:-5432}:5432"]
+    networks: [data, edge]
+  wiremock:
+    ports: ["8089:8080"]
+    networks: [app, edge]
+  prometheus:
+    ports: ["9090:9090"]
+    networks: [app, monitoring, edge]

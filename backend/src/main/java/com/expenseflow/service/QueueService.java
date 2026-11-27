@@ -56,7 +56,9 @@ public class QueueService {
         Role role = me.getRole();
         if (role == Role.EMPLOYEE) throw ApiException.forbidden("Role not allowed");
 
-        Specification<Claim> spec = roleQueueSpec(role, me);
+        // R15 / FR-APR-4: never queue the caller's own claims (an auditor's own claim goes to another auditor)
+        Specification<Claim> spec = roleQueueSpec(role, me)
+                .and((r, q, cb) -> cb.notEqual(r.get("employee").get("id"), me.getId()));
 
         if (departmentId != null) {
             spec = spec.and((r, q, cb) -> cb.equal(r.get("employee").get("department").get("id"), departmentId));
@@ -104,22 +106,24 @@ public class QueueService {
     }
 
     private Specification<Claim> roleQueueSpec(Role role, Employee me) {
+        // MANAGER level for anyone who is the claimant's manager or an active delegate of that manager:
+        // HEAD manages the managers and auditors (FR-APR-4), so their claims must show up in HEAD's queue too
+        List<Long> delegators = delegations.findApproverIdsForActiveDelegate(me.getId(), LocalDate.now());
+        List<Long> managerIds = new ArrayList<>(delegators);
+        managerIds.add(me.getId());
+        Specification<Claim> managerLevel = (root, q, cb) -> cb.and(
+                cb.equal(root.get("status"), ClaimStatus.PENDING_MANAGER),
+                root.get("employee").get("manager").get("id").in(managerIds));
         return switch (role) {
-            case MANAGER -> (root, q, cb) -> {
-                List<Long> delegators = delegations.findApproverIdsForActiveDelegate(me.getId(), LocalDate.now());
-                List<Long> managerIds = new ArrayList<>(delegators);
-                managerIds.add(me.getId());
-                Predicate mgrMatch = root.get("employee").get("manager").get("id").in(managerIds);
-                return cb.and(cb.equal(root.get("status"), ClaimStatus.PENDING_MANAGER), mgrMatch);
-            };
-            case AUDITOR -> (root, q, cb) -> cb.or(
+            case MANAGER -> managerLevel;
+            case AUDITOR -> managerLevel.or((root, q, cb) -> cb.or(
                     cb.equal(root.get("status"), ClaimStatus.PENDING_AUDITOR),
                     cb.and(
                             cb.equal(root.get("status"), ClaimStatus.APPROVED),
                             cb.equal(root.get("sampleAudit"), com.expenseflow.model.SampleAuditStatus.OPEN)
                     )
-            );
-            case HEAD -> (root, q, cb) -> cb.equal(root.get("status"), ClaimStatus.PENDING_HEAD);
+            ));
+            case HEAD -> managerLevel.or((root, q, cb) -> cb.equal(root.get("status"), ClaimStatus.PENDING_HEAD));
             case EMPLOYEE -> (root, q, cb) -> cb.disjunction();
         };
     }

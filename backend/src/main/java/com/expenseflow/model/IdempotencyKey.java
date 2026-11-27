@@ -32,9 +32,10 @@ public class IdempotencyKey {
     @Column(name = "response_status", nullable = false)
     private int responseStatus;
 
+    // JSON text, not Map: a Map round-trip turns 420.00 into 420.0 and the replay would differ (FR-CLM-7)
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "response_body", columnDefinition = "jsonb")
-    private Map<String, Object> responseBody;
+    private String responseBody;
 
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
@@ -57,8 +58,8 @@ public class IdempotencyKey {
     public int getResponseStatus() { return responseStatus; }
     public void setResponseStatus(int responseStatus) { this.responseStatus = responseStatus; }
 
-    public Map<String, Object> getResponseBody() { return responseBody; }
-    public void setResponseBody(Map<String, Object> responseBody) { this.responseBody = responseBody; }
+    public String getResponseBody() { return responseBody; }
+    public void setResponseBody(String responseBody) { this.responseBody = responseBody; }
 
     public Instant getCreatedAt() { return createdAt; }
 }

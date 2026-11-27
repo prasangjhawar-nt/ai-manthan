@@ -40,10 +40,15 @@ public class PayoutService {
     private final IdempotencyService idem;
     private final ClaimNumberGenerator numbers;
     private final BankClient bank;
+    private final java.time.Duration retryInterval;
+    private final org.springframework.transaction.support.TransactionTemplate tx;
 
     public PayoutService(PayoutBatchRepository batches, ClaimRepository claims,
                          CurrentUser current, AuditService audit, IdempotencyService idem,
-                         ClaimNumberGenerator numbers, BankClient bank, MeterRegistry registry) {
+                         ClaimNumberGenerator numbers, BankClient bank, MeterRegistry registry,
+                         @org.springframework.beans.factory.annotation.Value("${expenseflow.payout.retry-interval-ms:30000}")
+                         long retryIntervalMs,
+                         org.springframework.transaction.PlatformTransactionManager txManager) {
         this.batches = batches;
         this.claims = claims;
         this.current = current;
@@ -51,8 +56,11 @@ public class PayoutService {
         this.idem = idem;
         this.numbers = numbers;
         this.bank = bank;
+        this.retryInterval = java.time.Duration.ofMillis(retryIntervalMs);
+        this.tx = new org.springframework.transaction.support.TransactionTemplate(txManager);
+        // COUNT only: this runs on every scrape (5 s) on every replica
         registry.gauge("expenseflow_payout_pending_batches", this,
-                p -> p.batches.findByStatusOrderByCreatedAtAsc(PayoutBatchStatus.PENDING_SEND).size());
+                p -> p.batches.countByStatus(PayoutBatchStatus.PENDING_SEND));
     }
 
     private void assertHead() {
@@ -94,68 +102,109 @@ public class PayoutService {
         return batches.findById(id).orElseThrow(() -> ApiException.notFound("Batch not found"));
     }
 
-    @Transactional
+    /**
+     * R12 / FR-PAY-2..4. Two transactions, never a bank call inside the selection transaction:
+     *  1. lock the claims (FOR UPDATE, id order), batch PENDING_SEND, claims IN_PAYOUT, idempotency key -> COMMIT
+     *  2. send under the batch row lock (same path as the retry job and "Retry now") -> SENT/PAID or stays PENDING_SEND
+     * A concurrent second request for the same claims waits on the row locks and then gets 409; a duplicate with the
+     * same Idempotency-Key waits on the key lock and gets the same response.
+     */
     public PayoutBatchDto create(List<Long> claimIds, String idemKey) {
         assertHead();
         Employee me = current.employee();
-        String bodyHash = idem.hashBody(claimIds);
-        Optional<IdempotencyKey> existing = idem.findExisting(idemKey, me.getId());
-        if (existing.isPresent()) {
-            idem.assertSameBody(existing.get(), bodyHash);
-            idem.markReplay();
-            return idem.decode(existing.get(), PayoutBatchDto.class);
-        }
+        List<Long> ids = validateIds(claimIds);
+        String bodyHash = idem.hashBody(ids);
+        String endpoint = "POST /api/payout-batches";
 
-        List<Claim> selected = new ArrayList<>();
-        for (Long id : claimIds) {
-            Claim c = claims.findByIdWithEmployee(id)
-                    .orElseThrow(() -> ApiException.badRequest("Claim " + id + " not found"));
-            if (c.getStatus() != ClaimStatus.APPROVED) {
-                throw ApiException.conflict("Claim " + c.getClaimNumber() + " is " + c.getStatus() + ", not APPROVED");
+        Object first = tx.execute(status -> {
+            idem.acquire(idemKey, me.getId());
+            Optional<IdempotencyKey> existing = idem.findExisting(idemKey, me.getId());
+            if (existing.isPresent()) {
+                idem.assertSameBody(existing.get(), bodyHash);
+                idem.markReplay();
+                return idem.decode(existing.get(), PayoutBatchDto.class);
             }
-            if (c.getSampleAudit() == SampleAuditStatus.OPEN) {
-                throw ApiException.conflict("Claim " + c.getClaimNumber() + " has an open sample audit");
+
+            List<Claim> selected = new ArrayList<>();
+            for (Long id : ids.stream().sorted().toList()) {          // fixed lock order: no deadlocks
+                Claim c = claims.findByIdForUpdate(id)
+                        .orElseThrow(() -> ApiException.badRequest("Claim " + id + " not found"));
+                if (c.getStatus() != ClaimStatus.APPROVED) {
+                    throw ApiException.conflict("Claim " + c.getClaimNumber() + " is " + c.getStatus() + ", not APPROVED");
+                }
+                if (c.getSampleAudit() == SampleAuditStatus.OPEN) {
+                    throw ApiException.conflict("Claim " + c.getClaimNumber() + " has an open sample audit");
+                }
+                selected.add(c);
             }
-            selected.add(c);
+            BigDecimal total = selected.stream().map(Claim::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            String batchRef = numbers.nextBatchRef();
+            String fileName = "PAYOUT_" + batchRef + "_"
+                    + java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString().replace("-", "") + ".csv";
+
+            PayoutBatch batch = new PayoutBatch();
+            batch.setBatchRef(batchRef);
+            batch.setStatus(PayoutBatchStatus.PENDING_SEND);
+            batch.setClaimCount(selected.size());
+            batch.setTotalAmount(total);
+            batch.setFileName(fileName);
+            batch.setCsvContent(PayoutCsv.build(batchRef, selected));
+            batch.setAttempts(0);
+            batch.setCreatedBy(me);
+            PayoutBatch savedBatch = batches.save(batch);
+
+            for (Claim c : selected) {
+                StatusFlow.assertTransition(ClaimStatus.APPROVED, ClaimStatus.IN_PAYOUT);
+                c.setStatus(ClaimStatus.IN_PAYOUT);
+                c.setPayoutBatch(savedBatch);
+                claims.save(c);
+                audit.record(AuditService.Action.CLAIM_IN_PAYOUT, AuditService.EntityType.CLAIM,
+                        c.getId(), c.getId(), me, null, ClaimStatus.APPROVED, ClaimStatus.IN_PAYOUT,
+                        Map.of("batchRef", batchRef));
+            }
+            audit.record(AuditService.Action.PAYOUT_BATCH_CREATED, AuditService.EntityType.PAYOUT_BATCH,
+                    savedBatch.getId(), null, me, null, null, null,
+                    Map.of("batchRef", batchRef, "claims", selected.size(), "total", total));
+
+            idem.store(idemKey, me.getId(), endpoint, bodyHash, 201, PayoutBatchDto.from(savedBatch, selected));
+            return savedBatch.getId();
+        });
+        if (first instanceof PayoutBatchDto replay) {
+            return replay;
         }
-        BigDecimal total = selected.stream().map(Claim::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        String batchRef = numbers.nextBatchRef();
-        String csv = PayoutCsv.build(batchRef, selected);
-        String fileName = "PAYOUT_" + batchRef + "_" + java.time.LocalDate.now().toString().replace("-", "") + ".csv";
-
-        PayoutBatch batch = new PayoutBatch();
-        batch.setBatchRef(batchRef);
-        batch.setStatus(PayoutBatchStatus.PENDING_SEND);
-        batch.setClaimCount(selected.size());
-        batch.setTotalAmount(total);
-        batch.setFileName(fileName);
-        batch.setCsvContent(csv);
-        batch.setAttempts(0);
-        batch.setCreatedBy(me);
-        PayoutBatch savedBatch = batches.save(batch);
-
-        for (Claim c : selected) {
-            c.setStatus(ClaimStatus.IN_PAYOUT);
-            c.setPayoutBatch(savedBatch);
-            claims.save(c);
-        }
-
-        audit.record(AuditService.Action.PAYOUT_BATCH_CREATED, AuditService.EntityType.PAYOUT_BATCH,
-                savedBatch.getId(), null, me, null, null, null,
-                Map.of("batchRef", batchRef, "claims", selected.size(), "total", total));
-
-        trySend(savedBatch, selected);
-
-        PayoutBatchDto dto = PayoutBatchDto.from(savedBatch, selected);
-        idem.store(idemKey, me.getId(), "POST /api/payout-batches", bodyHash, 201, dto);
+        Long batchId = (Long) first;
+        PayoutBatchDto dto = tx.execute(status -> sendLocked(batchId));
+        idem.updateResponse(idemKey, me.getId(), dto);     // a replay returns the final state, like this response
         return dto;
+    }
+
+    private static List<Long> validateIds(List<Long> claimIds) {
+        if (claimIds == null || claimIds.isEmpty()) throw ApiException.badRequest("claimIds is required");
+        if (claimIds.stream().anyMatch(java.util.Objects::isNull)) throw ApiException.badRequest("claimIds must not contain null");
+        if (new java.util.HashSet<>(claimIds).size() != claimIds.size()) {
+            throw ApiException.badRequest("claimIds must be unique");   // [42,42] would pay claim 42 twice
+        }
+        return List.copyOf(claimIds);
+    }
+
+    /** Send one batch under its row lock; no-op if another replica/job already sent it. */
+    private PayoutBatchDto sendLocked(Long batchId) {
+        PayoutBatch b = batches.findByIdForUpdate(batchId)
+                .orElseThrow(() -> ApiException.notFound("Batch not found"));
+        List<Claim> inBatch = claims.findAll((r, q, cb) -> cb.equal(r.get("payoutBatch").get("id"), b.getId()));
+        if (b.getStatus() != PayoutBatchStatus.SENT) {
+            trySend(b, inBatch);
+        }
+        return PayoutBatchDto.from(b, inBatch);
     }
 
     @Transactional
     public PayoutBatchDto retry(Long id) {
         assertHead();
-        PayoutBatch b = batches.findById(id).orElseThrow(() -> ApiException.notFound("Batch not found"));
+        // row lock: never races the retry job (or another replica) into a double send
+        PayoutBatch b = batches.findByIdForUpdate(id).orElseThrow(() -> ApiException.notFound("Batch not found"));
         if (b.getStatus() == PayoutBatchStatus.SENT) {
             throw ApiException.conflict("Batch is already SENT");
         }
@@ -174,6 +223,7 @@ public class PayoutService {
             batch.setBankReference(ref.get());
             batch.setSentAt(Instant.now());
             batch.setLastError(null);
+            batch.setNextAttemptAt(null);
             batches.save(batch);
             Instant now = Instant.now();
             for (Claim c : inBatch) {
@@ -184,15 +234,22 @@ public class PayoutService {
                         c.getId(), c.getId(), null, null, ClaimStatus.IN_PAYOUT, ClaimStatus.PAID,
                         Map.of("batchRef", batch.getBatchRef(), "bankReference", ref.get()));
             }
-            audit.record(AuditService.Action.PAYOUT_SENT, AuditService.EntityType.PAYOUT_BATCH,
-                    batch.getId(), null, batch.getCreatedBy(), null, null, null,
-                    Map.of("batchRef", batch.getBatchRef(), "bankReference", ref.get()));
+            for (Claim c : inBatch) {   // per claim, so the claim timeline shows the payout (R14, drill 1 step 5)
+                audit.record(AuditService.Action.PAYOUT_SENT, AuditService.EntityType.PAYOUT_BATCH,
+                        batch.getId(), c.getId(), null, null, null, null,
+                        Map.of("batchRef", batch.getBatchRef(), "bankReference", ref.get(), "attempt", batch.getAttempts()));
+            }
         } else {
             batch.setLastError("Bank did not accept the batch (attempt " + batch.getAttempts() + ")");
+            // half the job interval: keeps replicas from hammering the bank, but the next scheduled run
+            // after a failed "create batch" still picks it up (worst case ~1.5 intervals, not 2)
+            batch.setNextAttemptAt(Instant.now().plus(retryInterval.dividedBy(2)));
             batches.save(batch);
-            audit.record(AuditService.Action.PAYOUT_SEND_FAILED, AuditService.EntityType.PAYOUT_BATCH,
-                    batch.getId(), null, batch.getCreatedBy(), null, null, null,
-                    Map.of("batchRef", batch.getBatchRef(), "attempt", batch.getAttempts()));
+            for (Claim c : inBatch) {
+                audit.record(AuditService.Action.PAYOUT_SEND_FAILED, AuditService.EntityType.PAYOUT_BATCH,
+                        batch.getId(), c.getId(), null, null, null, null,
+                        Map.of("batchRef", batch.getBatchRef(), "attempt", batch.getAttempts()));
+            }
         }
     }
 }

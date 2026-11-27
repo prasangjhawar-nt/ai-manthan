@@ -15,8 +15,14 @@ public class BankHealthIndicator implements HealthIndicator {
     public BankHealthIndicator(@Value("${expenseflow.bank.base-url}") String baseUrl,
                                @Value("${expenseflow.bank.timeout-ms}") int timeoutMs) {
         this.baseUrl = baseUrl;
+        // devops.md 6.2: probe GET /bank/health with a 1 s timeout (never longer than the bank timeout)
+        java.time.Duration t = java.time.Duration.ofMillis(Math.min(1000, timeoutMs));
+        var http = java.net.http.HttpClient.newBuilder().connectTimeout(t).build();
+        var factory = new org.springframework.http.client.JdkClientHttpRequestFactory(http);
+        factory.setReadTimeout(t);
         this.client = RestClient.builder()
                 .baseUrl(baseUrl)
+                .requestFactory(factory)
                 .build();
     }
 
@@ -24,7 +30,7 @@ public class BankHealthIndicator implements HealthIndicator {
     public Health health() {
         try {
             client.get()
-                    .uri("/__admin/health")
+                    .uri("/bank/health")
                     .retrieve()
                     .toBodilessEntity();
             return Health.up().withDetail("baseUrl", baseUrl).build();

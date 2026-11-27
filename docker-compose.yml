@@ -1,0 +1,192 @@
+# ExpenseFlow – full stack. `docker compose up -d --build --wait` starts everything:
+# gateway (:8080) → frontend + 2 backend replicas → postgres; mock bank; prometheus, grafana (:3000), exporters.
+# Details: docs/devops.md sections 1, 4, 5, 7, 8. Debug ports: add -f docker-compose.dev.yml.
+name: expenseflow
+
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: [/tmp]
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  # ---------------------------------------------------------------- app
+  gateway:
+    <<: *hardened
+    build: ./gateway
+    image: expenseflow/gateway:${TAG:-local}
+    ports: ["${GATEWAY_PORT:-8080}:8080"]
+    networks: [edge, app]
+    depends_on:
+      frontend: { condition: service_healthy }
+      backend: { condition: service_healthy }
+    restart: unless-stopped
+    logging: *logging
+
+  frontend:
+    <<: *hardened
+    build: ./frontend
+    image: expenseflow/frontend:${TAG:-local}
+    networks: [app]
+    restart: unless-stopped
+    logging: *logging
+
+  backend:
+    <<: *hardened
+    build: ./backend
+    image: expenseflow/backend:${TAG:-local}
+    # no container_name / host ports so it can scale (X1)
+    deploy:
+      replicas: ${BACKEND_REPLICAS:-2}
+      resources:
+        limits: { cpus: "${BACKEND_CPUS:-1.0}", memory: 768M }
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-app}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-app}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-32-bytes-minimum-0001}
+      JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-60}
+      EXTERNAL_SERVICE_URL: http://wiremock:8080
+      BANK_TIMEOUT_MS: ${BANK_TIMEOUT_MS:-3000}
+      PAYOUT_RETRY_INTERVAL_MS: ${PAYOUT_RETRY_INTERVAL_MS:-30000}
+      TZ: UTC
+    networks: [app, data]
+    # demo-breaker 2: postgres only – the bank is optional at runtime
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    logging: *logging
+
+  # Runs Flyway once before the backend starts (works even before the Boot 4 Flyway starter is in pom.xml).
+  migrate:
+    image: flyway/flyway:12.4.0-alpine
+    command: migrate
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-app}
+      FLYWAY_USER: ${POSTGRES_USER:-app}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_CONNECT_RETRIES: "20"
+    volumes:
+      - ./backend/src/main/resources/db/migration:/flyway/sql:ro
+    networks: [data]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+    logging: *logging
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      TZ: UTC
+    volumes:
+      - pgdata:/var/lib/postgresql   # demo-breaker 4: PG 18 path
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    logging: *logging
+
+  # Mock bank. Not hardened (demo-breaker 6). Outage drill: docker compose stop wiremock / start wiremock
+  wiremock:
+    image: wiremock/wiremock:3.9.1
+    command: ["--disable-banner"]
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings:ro
+    networks: [app]
+    restart: unless-stopped
+    logging: *logging
+
+  # ---------------------------------------------------------------- monitoring
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    networks: [app, monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports: ["${GRAFANA_PORT:-3000}:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/expenseflow.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    networks: [monitoring]
+    depends_on:
+      prometheus: { condition: service_healthy }
+    restart: unless-stopped
+    logging: *logging
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.3.0
+    command: ["--nginx.scrape-uri=http://gateway:8081/stub_status"]
+    networks: [app]
+    depends_on:
+      gateway: { condition: service_healthy }
+    restart: unless-stopped
+    logging: *logging
+
+  blackbox:
+    image: prom/blackbox-exporter:v0.25.0
+    networks: [app]
+    restart: unless-stopped
+    logging: *logging
+
+  # On demand only (profile): docker compose --profile loadtest run --rm k6
+  # Env: TARGET=http://backend:8080 (capacity) | http://gateway:8080 (default, shows 429s), VUS, DURATION, NAME
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: [loadtest]
+    command: ["run", "/scripts/load.js"]
+    environment:
+      TARGET: ${TARGET:-http://gateway:8080}
+      VUS: ${VUS:-50}
+      DURATION: ${DURATION:-1m}
+      NAME: ${NAME:-}
+    volumes:
+      - ./loadtest:/scripts:ro
+      - ./evidence:/evidence
+    networks: [app]
+    depends_on:
+      gateway: { condition: service_healthy }
+
+networks:
+  edge: {}                     # only network with published ports
+  app: { internal: true }
+  data: { internal: true }
+  monitoring: {}
+
+volumes:
+  pgdata:
+  promdata:
+  grafanadata:

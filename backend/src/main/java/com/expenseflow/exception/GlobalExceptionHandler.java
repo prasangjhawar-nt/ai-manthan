@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestControllerAdvice
+@org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
@@ -67,8 +68,55 @@ public class GlobalExceptionHandler {
                 "Authentication required", req, null);
     }
 
+    /** Concurrent edit of the same claim (JPA @Version) – README 4.2 FR-CLM-5: stale version -> 409. */
+    @ExceptionHandler(org.springframework.dao.OptimisticLockingFailureException.class)
+    public ResponseEntity<ProblemDetail> onOptimisticLock(Exception ex, HttpServletRequest req) {
+        return build(HttpStatus.CONFLICT, "Conflict",
+                "The claim was changed by another request; reload and try again", req, null);
+    }
+
+    /** e.g. two parallel requests with the same Idempotency-Key (UNIQUE idem_key,user_id) -> 409, not 500. */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<ProblemDetail> onConstraint(org.springframework.dao.DataIntegrityViolationException ex,
+                                                      HttpServletRequest req) {
+        log.warn("Constraint violation: {}", ex.getMostSpecificCause().getMessage());
+        return build(HttpStatus.CONFLICT, "Conflict",
+                "The request conflicts with data that was just written; retry with the same Idempotency-Key", req, null);
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ProblemDetail> onMediaType(Exception ex, HttpServletRequest req) {
+        return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type", ex.getMessage(), req, null);
+    }
+
+    @ExceptionHandler(org.springframework.web.bind.MissingRequestHeaderException.class)
+    public ResponseEntity<ProblemDetail> onMissingHeader(org.springframework.web.bind.MissingRequestHeaderException ex,
+                                                         HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, "Missing header", "Header " + ex.getHeaderName() + " is required", req, null);
+    }
+
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ProblemDetail> onTypeMismatch(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex,
+                                                        HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, "Bad request", "Invalid value for " + ex.getName(), req, null);
+    }
+
+    /** e.g. PageRequest.of(-1, ...) for ?page=-1 – a bad request, not a server error */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ProblemDetail> onIllegalArgument(IllegalArgumentException ex, HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, "Bad request", "Invalid request parameter", req, null);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> onOther(Exception ex, HttpServletRequest req) {
+        // Spring MVC's own exceptions (unknown path 404, 405, missing parameter, ...) carry their status
+        if (ex instanceof org.springframework.web.ErrorResponse er) {
+            HttpStatus status = HttpStatus.resolve(er.getStatusCode().value());
+            if (status != null && status.is4xxClientError()) {
+                return build(status, status.getReasonPhrase(),
+                        er.getBody().getDetail() == null ? status.getReasonPhrase() : er.getBody().getDetail(), req, null);
+            }
+        }
         log.error("Unhandled exception", ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error",
                 "An unexpected error occurred", req, null);
