@@ -1,0 +1,60 @@
+spring:
+  application:
+    name: expenseflow-backend
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/app}
+    username: ${SPRING_DATASOURCE_USERNAME:app}
+    password: ${SPRING_DATASOURCE_PASSWORD:app}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
+server:
+  port: 8080
+  error:
+    include-stacktrace: never
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+expenseflow:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-secret-change-me-at-least-32-bytes-long!!}
+    ttl-minutes: ${JWT_TTL_MINUTES:60}
+  bank:
+    base-url: ${EXTERNAL_SERVICE_URL:http://localhost:8089}
+    timeout-ms: ${BANK_TIMEOUT_MS:3000}
+  payout:
+    retry-interval-ms: ${PAYOUT_RETRY_INTERVAL_MS:30000}
+  policy:
+    cache-ttl-seconds: 60
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
