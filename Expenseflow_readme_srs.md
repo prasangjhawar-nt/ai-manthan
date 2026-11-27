@@ -441,7 +441,7 @@ Mobile-first claim capture at 375 px; labels on every input, visible focus, keyb
 flowchart LR
   U[Browser] -->|:8080| G[nginx gateway]
   G -->|/| F[frontend: React static files]
-  G -->|/api/*| B[backend: Spring Boot 4.1 / Java 21]
+  G -->|/api/*| B[backend: Spring Boot 4.1 / Java 25]
   B --> P[(PostgreSQL 18)]
   B -->|CSV payout| W[WireMock mock bank]
   PR[Prometheus] -.scrapes.-> B

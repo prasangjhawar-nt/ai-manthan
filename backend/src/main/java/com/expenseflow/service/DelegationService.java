@@ -51,6 +51,10 @@ public class DelegationService {
         }
         Employee delegate = employees.findById(req.delegateId())
                 .orElseThrow(() -> ApiException.badRequest("Delegate not found"));
+        // R10 / 2.1: delegation hands over MANAGER-level approval - never to a plain EMPLOYEE or an inactive user
+        if (!delegate.isActive() || delegate.getRole() == Role.EMPLOYEE) {
+            throw ApiException.badRequest("Delegate must be an active MANAGER, AUDITOR or HEAD");
+        }
         Delegation d = new Delegation();
         d.setApprover(me);
         d.setDelegate(delegate);

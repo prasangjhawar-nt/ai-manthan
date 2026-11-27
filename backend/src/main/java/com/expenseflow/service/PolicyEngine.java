@@ -36,6 +36,7 @@ public class PolicyEngine {
     private final Counter autoApprove;
     private final Counter route;
     private final Counter autoReject;
+    private final java.util.random.RandomGenerator sampleRandom = new java.security.SecureRandom();
 
     public PolicyEngine(PolicyConfigCache cache, ClaimLineRepository lines, MeterRegistry registry) {
         this.cache = cache;
@@ -79,12 +80,9 @@ public class PolicyEngine {
         } else {
             target = ClaimStatus.APPROVED;
             autoApprove.increment();
-            // Deterministic 10% sample: claim_number hash. For first submit the number may
-            // already be set; if not, caller has set it before evaluate(). Fall back to id.
-            String key = claim.getClaimNumber() != null ? claim.getClaimNumber() : String.valueOf(claim.getId());
-            if (Math.abs(key.hashCode()) % 100 < (int) Math.round(sampleRate * 100)) {
-                sampleAudit = true;
-            }
+            // R11: random at submit time. Not derived from the claim number, which the employee sees on the
+            // draft – that would let them predict (and dodge) the sample audit
+            sampleAudit = sampleRandom.nextDouble() < sampleRate;
         }
         return new Result(target, sampleAudit);
     }
@@ -132,11 +130,13 @@ public class PolicyEngine {
             }
         }
 
-        // No category rule -> NO_POLICY (unless already AUTO_REJECT)
-        if (outcome != LineOutcome.AUTO_REJECT && !categoryHasRule(line.getCategory(), snap)) {
+        // No category rule -> NO_POLICY. All checks run, all flags are collected (README 4.3)
+        if (!categoryHasRule(line.getCategory(), snap)) {
             if (!flags.contains(FLAG_NO_POLICY)) flags.add(FLAG_NO_POLICY);
-            outcome = LineOutcome.ROUTE;
-            if (reason == null) reason = "No auto-approve policy for " + line.getCategory();
+            if (outcome != LineOutcome.AUTO_REJECT) {
+                outcome = LineOutcome.ROUTE;
+                if (reason == null) reason = "No auto-approve policy for " + line.getCategory();
+            }
         }
 
         line.setOutcome(outcome);
@@ -173,13 +173,16 @@ public class PolicyEngine {
                 yield new OverLimitCheck(false, null);
             }
             case HOTEL -> {
-                boolean tier1 = line.getCity() != null && snap.tier1Cities().contains(line.getCity());
+                // "mumbai", " Mumbai " and "Mumbai" are the same city
+                boolean tier1 = line.getCity() != null && snap.tier1Cities().stream()
+                        .anyMatch(t -> t.equalsIgnoreCase(line.getCity().trim()));
                 BigDecimal limit = ruleLimit(snap, tier1 ? "HOTEL_T1" : "HOTEL_OTHER");
                 if (limit == null || line.getNights() == null || line.getNights() == 0) {
                     yield new OverLimitCheck(false, null);
                 }
+                // compare amount > limit x nights: rounding amount/nights first let 18,000.01 for 3 nights pass
                 BigDecimal perNight = line.getAmount().divide(BigDecimal.valueOf(line.getNights()), 2, java.math.RoundingMode.HALF_UP);
-                if (perNight.compareTo(limit) > 0) {
+                if (line.getAmount().compareTo(limit.multiply(BigDecimal.valueOf(line.getNights()))) > 0) {
                     yield new OverLimitCheck(true,
                             perNight.toPlainString() + " per night is above the " + (tier1 ? "tier-1 " : "") + "limit of " + limit.toPlainString());
                 }
@@ -223,6 +226,16 @@ public class PolicyEngine {
         if (line.getReceipt() != null) {
             var byHash = lines.findDuplicatesByReceiptHash(line.getReceipt().getSha256(), claim.getId());
             if (!byHash.isEmpty()) return true;
+            if (line.getReceipt().getId() != null
+                    && lines.existsOtherReceiptWithHash(line.getReceipt().getSha256(), line.getReceipt().getId())) {
+                return true;
+            }
+            // same receipt file on an earlier line of this claim
+            String sha = line.getReceipt().getSha256();
+            for (ClaimLine sibling : claim.getLines()) {
+                if (sibling == line || sibling.getLineNo() >= line.getLineNo() || sibling.getReceipt() == null) continue;
+                if (sha != null && sha.equals(sibling.getReceipt().getSha256())) return true;
+            }
         }
         return false;
     }

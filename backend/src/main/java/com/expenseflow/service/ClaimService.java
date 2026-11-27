@@ -18,6 +18,7 @@ import com.expenseflow.model.Receipt;
 import com.expenseflow.model.SampleAuditStatus;
 import com.expenseflow.repository.ApprovalStepRepository;
 import com.expenseflow.repository.ClaimRepository;
+import com.expenseflow.repository.DelegationRepository;
 import com.expenseflow.repository.ReceiptRepository;
 import com.expenseflow.security.CurrentUser;
 import jakarta.persistence.EntityManager;
@@ -50,11 +51,12 @@ public class ClaimService {
     private final AuditService audit;
     private final PolicyEngine policy;
     private final IdempotencyService idem;
+    private final DelegationRepository delegations;
 
     public ClaimService(ClaimRepository claims, ReceiptRepository receipts,
                         ApprovalStepRepository steps, ClaimNumberGenerator numbers,
                         CurrentUser current, AuditService audit, PolicyEngine policy,
-                        IdempotencyService idem) {
+                        IdempotencyService idem, DelegationRepository delegations) {
         this.claims = claims;
         this.receipts = receipts;
         this.steps = steps;
@@ -63,6 +65,7 @@ public class ClaimService {
         this.audit = audit;
         this.policy = policy;
         this.idem = idem;
+        this.delegations = delegations;
     }
 
     // ---------- create / update / list / get ----------
@@ -71,6 +74,7 @@ public class ClaimService {
     public ClaimDto create(ClaimCreateRequest req, String idempotencyKey) {
         Employee me = current.employee();
         String bodyHash = idem.hashBody(req);
+        idem.acquire(idempotencyKey, me.getId());
         Optional<IdempotencyKey> existing = idem.findExisting(idempotencyKey, me.getId());
         if (existing.isPresent()) {
             idem.assertSameBody(existing.get(), bodyHash);
@@ -110,7 +114,7 @@ public class ClaimService {
         c.getLines().clear();
         em.flush(); // force orphan deletes before new line inserts (unique(claim_id,line_no))
         applyLines(c, req.lines());
-        Claim saved = claims.save(c);
+        Claim saved = claims.saveAndFlush(c);   // flushed so the response carries the new version
 
         audit.record(AuditService.Action.CLAIM_UPDATED, AuditService.EntityType.CLAIM,
                 saved.getId(), saved.getId(), me, null, c.getStatus(), c.getStatus(),
@@ -143,6 +147,7 @@ public class ClaimService {
         Employee me = current.employee();
         String endpoint = "POST /api/claims/" + id + "/submit";
         String bodyHash = idem.hashString(endpoint);
+        idem.acquire(idempotencyKey, me.getId());   // a parallel double-click waits, then replays (FR-CLM-7)
         Optional<IdempotencyKey> existing = idem.findExisting(idempotencyKey, me.getId());
         if (existing.isPresent()) {
             idem.assertSameBody(existing.get(), bodyHash);
@@ -199,16 +204,32 @@ public class ClaimService {
         return c;
     }
 
+    /** README 2.1: own; MANAGER = direct reports' + delegated; AUDITOR/HEAD = all. Everything else is 404. */
     public boolean canView(Claim c, Employee caller) {
         if (c.getEmployee().getId().equals(caller.getId())) return true;
-        return switch (caller.getRole()) {
-            case AUDITOR, HEAD -> true;
-            case MANAGER -> {
-                Employee owner = c.getEmployee();
-                yield owner.getManager() != null && owner.getManager().getId().equals(caller.getId());
-            }
-            case EMPLOYEE -> false;
-        };
+        if (caller.getRole() == com.expenseflow.model.Role.AUDITOR
+                || caller.getRole() == com.expenseflow.model.Role.HEAD) return true;
+        Employee manager = c.getEmployee().getManager();
+        if (manager == null) return false;
+        if (manager.getId().equals(caller.getId())) return true;
+        // R10: an active delegate of the claimant's manager sees (and may act on) the claim
+        return delegations.isActiveDelegate(manager.getId(), caller.getId(), LocalDate.now());
+    }
+
+    /**
+     * For approve / send back / reject: like loadVisible, but a delegate of the claimant's manager whose
+     * delegation is expired or not yet active still "sees" it, so the action fails with 403 (FR-APR-5)
+     * instead of 404. Everyone else gets 404 exactly as for reads (R13).
+     */
+    public Claim loadForAction(Long id, Employee caller) {
+        Claim c = claims.findByIdWithEmployee(id)
+                .orElseThrow(() -> ApiException.notFound("Claim not found"));
+        if (canView(c, caller)) return c;
+        Employee manager = c.getEmployee().getManager();
+        if (manager != null && delegations.existsByApprover_IdAndDelegate_Id(manager.getId(), caller.getId())) {
+            return c;
+        }
+        throw ApiException.notFound("Claim not found");
     }
 
     public Claim loadOwned(Long id, Employee caller) {
@@ -233,7 +254,9 @@ public class ClaimService {
             line.setNights(in.nights() == null ? null : in.nights().shortValue());
             line.setDescription(in.description());
             if (in.receiptId() != null) {
+                // only the claimant's own receipts can be attached (no attaching/viewing other people's files)
                 Receipt r = receipts.findById(in.receiptId())
+                        .filter(x -> x.getOwner().getId().equals(claim.getEmployee().getId()))
                         .orElseThrow(() -> ApiException.badRequest("Receipt " + in.receiptId() + " not found"));
                 line.setReceipt(r);
             }

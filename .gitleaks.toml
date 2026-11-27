@@ -1,0 +1,17 @@
+# gitleaks config (loaded automatically from the repo root). Default rules + reviewed false positives (NFR-SEC-9).
+title = "ExpenseFlow gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed false positives"
+# build output / reports are git-ignored and contain only test fixtures (e.g. the test JWT secret)
+paths = [
+  '''(^|/)target/''',
+  '''(^|/)node_modules/''',
+]
+# the example token in the locked API contract: header.payload.base64("signature") – not a real credential
+regexes = [
+  '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMDEiLCJyb2xlIjoiRU1QTE9ZRUUifQ\.c2lnbmF0dXJl''',
+]

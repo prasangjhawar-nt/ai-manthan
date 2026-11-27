@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingRequestHeaderException;
@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestControllerAdvice
+@org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
@@ -107,8 +108,10 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_FOUND, "Not found", "No such endpoint", req, null);
     }
 
-    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
-    public ResponseEntity<ProblemDetail> onStale(ObjectOptimisticLockingFailureException ex, HttpServletRequest req) {
+    /** Concurrent edit (JPA @Version) or a stale lock - README 4.2 FR-CLM-5: stale version -> 409.
+     *  The DAO base type also covers optimistic-lock failures not wrapped as ObjectOptimisticLockingFailureException. */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ProblemDetail> onStale(OptimisticLockingFailureException ex, HttpServletRequest req) {
         return build(HttpStatus.CONFLICT, "Stale version",
                 "Someone else changed this record. Reload and try again.", req, null);
     }
@@ -119,8 +122,23 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, "Conflict", "The request conflicts with existing data", req, null);
     }
 
+    /** e.g. PageRequest.of(-1, ...) for ?page=-1 - a bad request, not a server error */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ProblemDetail> onIllegalArgument(IllegalArgumentException ex, HttpServletRequest req) {
+        log.debug("Illegal argument: {}", ex.getMessage());
+        return build(HttpStatus.BAD_REQUEST, "Validation failed", "Invalid request parameter", req, null);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> onOther(Exception ex, HttpServletRequest req) {
+        // Spring MVC's own exceptions (unknown path 404, 405, missing parameter, ...) carry their status
+        if (ex instanceof org.springframework.web.ErrorResponse er) {
+            HttpStatus status = HttpStatus.resolve(er.getStatusCode().value());
+            if (status != null && status.is4xxClientError()) {
+                return build(status, status.getReasonPhrase(),
+                        er.getBody().getDetail() == null ? status.getReasonPhrase() : er.getBody().getDetail(), req, null);
+            }
+        }
         log.error("Unhandled exception", ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error",
                 "An unexpected error occurred", req, null);

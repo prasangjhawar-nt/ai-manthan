@@ -42,8 +42,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()
                 )
+                // FR-AUTH-3: no/invalid/expired token -> 401 (so the SPA can send the user back to /login),
+                // forbidden -> 403; both as RFC 9457 ProblemDetail with the correlation id
                 .exceptionHandling(e -> e
-                        // No/expired token -> 401 so the SPA can send the user back to /login
                         .authenticationEntryPoint((req, res, ex) ->
                                 writeProblem(res, 401, "Unauthorized", "Missing or expired token", req.getRequestURI()))
                         .accessDeniedHandler((req, res, ex) ->
@@ -63,7 +64,15 @@ public class SecurityConfig {
                 + (cid == null ? "" : ",\"correlationId\":\"" + escape(cid) + "\"") + ",\"errors\":[]}");
     }
 
+    /** JSON string escape: quotes, backslash and control characters (the request URI is client-controlled). */
     private static String escape(String v) {
-        return v == null ? "" : v.replace("\\", "\\\\").replace("\"", "\\\"");
+        if (v == null) return "";
+        StringBuilder b = new StringBuilder(v.length());
+        for (char c : v.toCharArray()) {
+            if (c == '"' || c == '\\') b.append('\\').append(c);
+            else if (c < 0x20) b.append(String.format("\\u%04x", (int) c));
+            else b.append(c);
+        }
+        return b.toString();
     }
 }

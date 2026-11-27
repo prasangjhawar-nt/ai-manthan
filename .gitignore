@@ -1,0 +1,17 @@
+# secrets – never commit
+.env
+secrets/*
+!secrets/README.md
+
+# build output
+**/target/
+**/node_modules/
+**/dist/
+backups/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

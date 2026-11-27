@@ -38,4 +38,7 @@ public interface DelegationRepository extends JpaRepository<Delegation, Long> {
     boolean isActiveDelegate(@Param("approverId") Long approverId,
                              @Param("delegateId") Long delegateId,
                              @Param("today") LocalDate today);
+
+    /** Any delegation, whatever its dates - an expired/future delegate gets 403 (FR-APR-5), not 404. */
+    boolean existsByApprover_IdAndDelegate_Id(Long approverId, Long delegateId);
 }

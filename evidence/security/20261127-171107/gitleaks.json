@@ -1,0 +1,42 @@
+[
+ {
+  "Description": "Uncovered a JSON Web Token, which may lead to unauthorized access to web applications and sensitive user data.",
+  "StartLine": 50,
+  "EndLine": 50,
+  "StartColumn": 25,
+  "EndColumn": 100,
+  "Match": "REDACTED",
+  "Secret": "REDACTED",
+  "File": "hackathon-swagger.yaml",
+  "SymlinkFile": "",
+  "Commit": "25583b685cdf4e215c0bf66b316d81794f9613d3",
+  "Entropy": 4.9402423,
+  "Author": "Dipesh Patidar",
+  "Email": "dipesh.patidar@nucleusteq.com",
+  "Date": "2026-11-27T10:59:12Z",
+  "Message": "Agent host session c2f7fead-ca8b-4f64-8421-54c24471ae29 - baseline checkpoint",
+  "Tags": [],
+  "RuleID": "jwt",
+  "Fingerprint": "25583b685cdf4e215c0bf66b316d81794f9613d3:hackathon-swagger.yaml:jwt:50"
+ },
+ {
+  "Description": "Uncovered a JSON Web Token, which may lead to unauthorized access to web applications and sensitive user data.",
+  "StartLine": 50,
+  "EndLine": 50,
+  "StartColumn": 25,
+  "EndColumn": 100,
+  "Match": "REDACTED",
+  "Secret": "REDACTED",
+  "File": "hackathon-swagger.yaml",
+  "SymlinkFile": "",
+  "Commit": "6169bb546c208070e241b26709ac6e384bf205cc",
+  "Entropy": 4.9402423,
+  "Author": "Harsh Farkiya",
+  "Email": "harshfarkiya123@gmail.com",
+  "Date": "2026-11-27T09:38:12Z",
+  "Message": "swagger-doc",
+  "Tags": [],
+  "RuleID": "jwt",
+  "Fingerprint": "6169bb546c208070e241b26709ac6e384bf205cc:hackathon-swagger.yaml:jwt:50"
+ }
+]

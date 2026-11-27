@@ -101,6 +101,9 @@ public class Claim {
 
     public Instant getUpdatedAt() { return updatedAt; }
 
+    @PreUpdate
+    void touchUpdatedAt() { this.updatedAt = Instant.now(); }
+
     public List<ClaimLine> getLines() { return lines; }
     public void setLines(List<ClaimLine> lines) { this.lines = lines; }
 }

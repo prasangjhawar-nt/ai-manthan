@@ -2,7 +2,6 @@ package com.expenseflow.service;
 
 import com.expenseflow.model.Claim;
 import com.expenseflow.model.PayoutBatch;
-import com.expenseflow.model.PayoutBatchStatus;
 import com.expenseflow.repository.ClaimRepository;
 import com.expenseflow.repository.PayoutBatchRepository;
 import org.slf4j.Logger;
@@ -28,10 +27,11 @@ public class PayoutRetryJob {
         this.payouts = payouts;
     }
 
+    /** Runs on every replica; FOR UPDATE SKIP LOCKED makes each due batch go to exactly one of them. */
     @Scheduled(fixedDelayString = "${expenseflow.payout.retry-interval-ms:30000}")
     @Transactional
     public void retry() {
-        List<PayoutBatch> pending = batches.findByStatusOrderByCreatedAtAsc(PayoutBatchStatus.PENDING_SEND);
+        List<PayoutBatch> pending = batches.lockDueForSend(5);
         if (pending.isEmpty()) return;
         log.info("Payout retry: {} pending batch(es)", pending.size());
         for (PayoutBatch b : pending) {

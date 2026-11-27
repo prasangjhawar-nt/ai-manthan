@@ -38,6 +38,13 @@ public class ApprovalService {
     private final ClaimService claimService;
     private final IdempotencyService idem;
     private final PolicyConfigCache policyCache;
+    private org.springframework.transaction.support.TransactionTemplate perClaimTx;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setTransactionManager(org.springframework.transaction.PlatformTransactionManager tm) {
+        this.perClaimTx = new org.springframework.transaction.support.TransactionTemplate(tm);
+        this.perClaimTx.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     public ApprovalService(ClaimRepository claims, ApprovalStepRepository steps,
                            DelegationRepository delegations, CurrentUser current,
@@ -58,7 +65,7 @@ public class ApprovalService {
     @Transactional
     public ClaimDto approve(Long claimId, String comment) {
         Employee caller = current.employee();
-        Claim c = claimService.loadVisible(claimId, caller);
+        Claim c = claimService.loadForAction(claimId, caller);
         ApprovalContext ctx = resolveActor(c, caller);
 
         BigDecimal auditorAbove = policyCache.get().money("approval.auditor.above");
@@ -68,8 +75,7 @@ public class ApprovalService {
         ClaimStatus next = switch (prior) {
             case PENDING_MANAGER -> c.getTotalAmount().compareTo(auditorAbove) > 0
                     ? ClaimStatus.PENDING_AUDITOR : ClaimStatus.APPROVED;
-            case PENDING_AUDITOR -> c.getTotalAmount().compareTo(headAbove) > 0
-                    ? ClaimStatus.PENDING_HEAD : ClaimStatus.APPROVED;
+            case PENDING_AUDITOR -> needsHead(c, headAbove) ? ClaimStatus.PENDING_HEAD : ClaimStatus.APPROVED;
             case PENDING_HEAD -> ClaimStatus.APPROVED;
             default -> throw ApiException.conflict("Action approve is not allowed in status " + prior);
         };
@@ -106,7 +112,7 @@ public class ApprovalService {
             throw ApiException.badRequest("comment is required");
         }
         Employee caller = current.employee();
-        Claim c = claimService.loadVisible(claimId, caller);
+        Claim c = claimService.loadForAction(claimId, caller);
         ApprovalContext ctx = resolveActor(c, caller);
         ClaimStatus prior = c.getStatus();
         StatusFlow.assertTransition(prior, ClaimStatus.NEEDS_CLARIFICATION);
@@ -138,7 +144,7 @@ public class ApprovalService {
             throw ApiException.badRequest("reason is required");
         }
         Employee caller = current.employee();
-        Claim c = claimService.loadVisible(claimId, caller);
+        Claim c = claimService.loadForAction(claimId, caller);
         ApprovalContext ctx = resolveActor(c, caller);
         ClaimStatus prior = c.getStatus();
         StatusFlow.assertTransition(prior, ClaimStatus.REJECTED);
@@ -174,7 +180,13 @@ public class ApprovalService {
             throw ApiException.forbidden("Only AUDITOR can bulk approve");
         }
 
-        String bodyHash = idem.hashBody(Map.of("claimIds", claimIds, "comment", comment == null ? "" : comment));
+        // LinkedHashMap, not Map.of: Map.of iteration order differs per JVM, so the same body hashed differently
+        // on the other replica / after a restart and a legitimate replay got 409
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("claimIds", claimIds);
+        body.put("comment", comment == null ? "" : comment);
+        String bodyHash = idem.hashBody(body);
+        idem.acquire(idemKey, caller.getId());
         Optional<IdempotencyKey> existing = idem.findExisting(idemKey, caller.getId());
         if (existing.isPresent()) {
             idem.assertSameBody(existing.get(), bodyHash);
@@ -187,27 +199,39 @@ public class ApprovalService {
         List<BulkApproveResponse.Result> results = new ArrayList<>();
         int succeeded = 0, failed = 0;
         for (Long id : claimIds) {
+            // FR-AUD-2: each claim is processed independently – its own transaction, so one conflicting claim
+            // (changed concurrently) does not roll back the others
+            BulkApproveResponse.Result r;
+            try {
+                r = perClaimTx.execute(s -> bulkApproveOne(id, caller, comment, headAbove));
+            } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+                r = new BulkApproveResponse.Result(id, null, "SKIPPED", null, 409, "Claim was changed concurrently");
+            }
+            results.add(r);
+            if (r.errorStatus() == null) succeeded++; else failed++;
+        }
+
+        BulkApproveResponse response = new BulkApproveResponse(claimIds.size(), succeeded, failed, results);
+        idem.store(idemKey, caller.getId(), "POST /api/approvals/bulk-approve", bodyHash, 200, response);
+        return response;
+    }
+
+    private BulkApproveResponse.Result bulkApproveOne(Long id, Employee caller, String comment, BigDecimal headAbove) {
+        {
             Optional<Claim> opt = claims.findByIdWithEmployee(id);
             if (opt.isEmpty()) {
-                results.add(new BulkApproveResponse.Result(id, null, "SKIPPED", null, 404, "Claim not found"));
-                failed++;
-                continue;
+                return new BulkApproveResponse.Result(id, null, "SKIPPED", null, 404, "Claim not found");
             }
             Claim c = opt.get();
             if (c.getStatus() != ClaimStatus.PENDING_AUDITOR) {
-                results.add(new BulkApproveResponse.Result(id, c.getClaimNumber(), "SKIPPED", null, 409,
-                        "Claim is " + c.getStatus() + ", not PENDING_AUDITOR"));
-                failed++;
-                continue;
+                return new BulkApproveResponse.Result(id, c.getClaimNumber(), "SKIPPED", null, 409,
+                        "Claim is " + c.getStatus() + ", not PENDING_AUDITOR");
             }
             if (c.getEmployee().getId().equals(caller.getId())) {
-                results.add(new BulkApproveResponse.Result(id, c.getClaimNumber(), "SKIPPED", null, 403,
-                        "Cannot approve own claim"));
-                failed++;
-                continue;
+                return new BulkApproveResponse.Result(id, c.getClaimNumber(), "SKIPPED", null, 403,
+                        "Cannot approve own claim");
             }
-            ClaimStatus next = c.getTotalAmount().compareTo(headAbove) > 0
-                    ? ClaimStatus.PENDING_HEAD : ClaimStatus.APPROVED;
+            ClaimStatus next = needsHead(c, headAbove) ? ClaimStatus.PENDING_HEAD : ClaimStatus.APPROVED;
 
             ApprovalStep step = new ApprovalStep();
             step.setClaim(c);
@@ -229,15 +253,11 @@ public class ApprovalService {
                     c.getId(), c.getId(), caller, null, prior, next,
                     Map.of("level", "AUDITOR", "bulk", true));
 
-            results.add(new BulkApproveResponse.Result(id, c.getClaimNumber(),
+            claims.flush();   // version check happens here, inside this claim's own transaction
+            return new BulkApproveResponse.Result(id, c.getClaimNumber(),
                     next == ClaimStatus.APPROVED ? "APPROVED" : "PENDING_HEAD",
-                    next, null, null));
-            succeeded++;
+                    next, null, null);
         }
-
-        BulkApproveResponse response = new BulkApproveResponse(claimIds.size(), succeeded, failed, results);
-        idem.store(idemKey, caller.getId(), "POST /api/approvals/bulk-approve", bodyHash, 200, response);
-        return response;
     }
 
     // ---------- sample audit ----------
@@ -249,6 +269,9 @@ public class ApprovalService {
             throw ApiException.forbidden("Only AUDITOR can resolve a sample audit");
         }
         Claim c = claimService.loadVisible(claimId, caller);
+        if (c.getEmployee().getId().equals(caller.getId())) {
+            throw ApiException.forbidden("You can't resolve the sample audit of your own claim");   // R15
+        }
         if (c.getSampleAudit() != SampleAuditStatus.OPEN) {
             throw ApiException.conflict("Claim has no open sample audit");
         }
@@ -273,6 +296,14 @@ public class ApprovalService {
         }
         Claim saved = claims.save(c);
         return claimService.toDto(saved);
+    }
+
+    /**
+     * R9: HEAD level only above approval.head.above. A11: the HEAD's own claim stops at AUDITOR,
+     * because there is no second head to approve it (it would otherwise be stuck in PENDING_HEAD).
+     */
+    private static boolean needsHead(Claim c, BigDecimal headAbove) {
+        return c.getTotalAmount().compareTo(headAbove) > 0 && c.getEmployee().getRole() != Role.HEAD;
     }
 
     // ---------- actor + delegation resolution ----------
