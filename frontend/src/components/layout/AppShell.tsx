@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useState, type ReactNode } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
-import { LayoutGrid, ReceiptText, Inbox, Landmark, ScrollText, UserRoundCog, LogOut, Menu, Plus, HelpCircle, Bell } from "lucide-react"
+import { LayoutGrid, ReceiptText, Inbox, Landmark, ScrollText, UserRoundCog, UserPlus, LogOut, Menu, Plus, HelpCircle, Bell } from "lucide-react"
 import type { Role } from "@/api/types"
 import { useAuth } from "@/lib/auth"
 import { ROLE_LABEL } from "@/lib/format"
@@ -26,6 +26,7 @@ const NAV: NavItem[] = [
   { to: "/claims", label: "My claims", icon: ReceiptText, roles: ["EMPLOYEE", "MANAGER", "AUDITOR", "HEAD"] },
   { to: "/payouts", label: "Payouts", icon: Landmark, roles: ["HEAD"] },
   { to: "/delegation", label: "Delegation", icon: UserRoundCog, roles: ["MANAGER", "AUDITOR", "HEAD"] },
+  { to: "/admin/users", label: "Register employee", icon: UserPlus, roles: ["HEAD"] },
   { to: "/policy", label: "Policy", icon: ScrollText, roles: ["EMPLOYEE", "MANAGER", "AUDITOR", "HEAD"] },
 ]
 
@@ -49,7 +50,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             key={item.to}
             to={item.to}
             onClick={onNavigate}
-            data-testid={`nav-${item.to.slice(1)}`}
+            data-testid={`nav-${item.to.slice(1).replace(/\//g, "-")}`}
             style={{ "--i": i } as React.CSSProperties}
             className={({ isActive }) =>
               cn(

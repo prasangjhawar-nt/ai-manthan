@@ -26,3 +26,6 @@ dist-ssr
 # Playwright
 e2e/report
 e2e/.results
+
+# Vitest coverage
+coverage

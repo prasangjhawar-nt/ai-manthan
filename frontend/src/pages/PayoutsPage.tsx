@@ -174,7 +174,7 @@ function BatchItem({ b, i }: { b: PayoutBatch; i: number }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-[12.5px] font-medium">{b.batchRef}</p>
-          <p className="mt-0.5 text-[12px] text-ink-3">{b.claimCount} claims · {relative(b.createdAt)}</p>
+          <p className="mt-0.5 text-[12px] text-ink-3">{b.claimCount} claim{b.claimCount === 1 ? "" : "s"} · {relative(b.createdAt)}</p>
         </div>
         {pending ? <Badge tone="info" dot pulse>Waiting for bank</Badge> : <Badge tone="positive" dot>Sent</Badge>}
       </div>

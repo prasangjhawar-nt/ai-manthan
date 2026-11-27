@@ -19,8 +19,8 @@
 
   --ink: #131613;             /* primary text */
   --ink-2: #3e433d;           /* secondary text */
-  --ink-3: #6a6f68;           /* metadata */
-  --ink-4: #9ca19a;           /* placeholders, disabled */
+  --ink-3: #5c6159;           /* metadata */
+  --ink-4: #6b7169;           /* placeholders, disabled */
 
   /* ---- Brand ---------------------------------------------------------- */
   --obsidian: #11231a;        /* primary CTA (deep green-black) */
@@ -34,9 +34,9 @@
   --card-highlight: transparent;
 
   /* ---- Semantic ------------------------------------------------------- */
-  --positive: #0f8a5f;
+  --positive: #0e7c56;
   --positive-soft: #e6f5ee;
-  --warning: #a8650a;
+  --warning: #9e5f09;
   --warning-soft: #fcf2e0;
   --danger: #c0392b;
   --danger-soft: #fceceb;

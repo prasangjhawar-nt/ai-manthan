@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach } from "vitest"
-import { cleanup } from "@testing-library/react"
+import { cleanup, configure } from "@testing-library/react"
 import { mockConfig, resetMockDb } from "@/api/mock"
 
 // jsdom gaps used by the UI
@@ -16,8 +16,12 @@ if (!("ResizeObserver" in window)) {
   }
 }
 Element.prototype.scrollIntoView ??= function () {}
+Element.prototype.scrollTo ??= function () {}
 
 mockConfig.latencyMs = 0
+
+// Pages are lazy-loaded chunks; on a busy machine the first import can exceed the 1 s default.
+configure({ asyncUtilTimeout: 5000 })
 
 beforeEach(() => {
   localStorage.clear()

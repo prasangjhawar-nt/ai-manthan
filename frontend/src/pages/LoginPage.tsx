@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { useLocation, useNavigate } from "react-router-dom"
-import { ArrowRight, Eye, EyeOff, ShieldCheck, Sparkles } from "lucide-react"
+import { ArrowRight, Eye, EyeOff, Sparkles } from "lucide-react"
 import { homeFor, useAuth } from "@/lib/auth"
 import { ApiError } from "@/api/client"
 import { Button, Field, Input } from "@/components/ds/primitives"
@@ -97,6 +97,9 @@ export default function LoginPage() {
               Sign in <ArrowRight />
             </Button>
           </form>
+          <p className="mt-4 text-center text-[12.5px] text-ink-3" data-testid="login-register-hint">
+            New to ExpenseFlow? Accounts are registered by your finance head — ask them for your sign-in email and one-time password.
+          </p>
 
           <div className="stagger mt-8" style={{ "--i": 2 } as React.CSSProperties}>
             <div className="flex items-center gap-3 text-[11.5px] tracking-[0.06em] text-ink-4 uppercase">
@@ -118,9 +121,6 @@ export default function LoginPage() {
             </div>
           </div>
         </div>
-        <p className="flex items-center gap-1.5 text-[12px] text-ink-4">
-          <ShieldCheck className="size-3.5" /> Synthetic demo data only · Team 45 · AI Manthan 2026
-        </p>
       </div>
 
       {/* Showcase */}

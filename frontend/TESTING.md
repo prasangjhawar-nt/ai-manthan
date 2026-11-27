@@ -12,12 +12,20 @@ BASE_URL=http://localhost:8080 npm run e2e   # same suite against the docker gat
 ```
 
 ## Test pyramid (frontend)
-| Level | Tool | Files | Count |
+| Level | Tool | File | Tests |
 |---|---|---|---|
-| Unit — rules, validation, formatting, theme, primitives | Vitest | `src/lib/*.test.ts`, `src/components/ds/ds.test.tsx` | 41 |
-| API integration — every story through `src/api/*` against the contract mock | Vitest | `src/api/api.test.ts` | 26 |
-| Component — pages rendered with router + query + auth | Vitest + Testing Library | `src/pages/pages.test.tsx` | 18 |
+| Unit — validation & policy preview (R1–R9, R16), local-date safety | Vitest | `src/lib/claim-rules.test.ts` | 20 |
+| Unit — INR/compact/duration formatting, status language | Vitest | `src/lib/format.test.ts` | 15 |
+| Unit — auth: role homes, login/logout, restore, auto-expiry | Vitest | `src/lib/auth.test.tsx` | 9 |
+| Unit — API client: headers, query building, problem+json, 401 sign-out, network errors, session | Vitest (stubbed transport) | `src/api/client.test.ts` | 14 |
+| Unit — design system: Amount, chips, states, Segmented, CityCombobox keyboard, Modal, Field, toasts, CountUp, theme | Vitest + Testing Library | `src/components/ds/components.test.tsx`, `ds.test.tsx` | 32 |
+| Integration — every story through `src/api/*` against the contract mock | Vitest | `src/api/api.test.ts` | 26 |
+| Integration — remaining rules & permissions: R5 duplicates, full chain to head, wrong-level 403, reject/send-back, R17 resubmit, edit locks, R11 sample audit, delegation, payout idempotency/detail, dashboard range, comments, policy | Vitest | `src/api/rules.test.ts` | 20 |
+| Component — pages with router + query + auth (login, claim form, lists, approvals, policy, decisions) | Vitest + Testing Library | `src/pages/pages.test.tsx` | 18 |
+| Component — routing & role guards, shell, Dashboard, Payouts, Delegation, claim detail branches, form edit/draft, list search, login edge cases, queue filters & bulk results | Vitest + Testing Library | `src/pages/screens.test.tsx` | 32 |
 | **E2E (README §12)** — real browser, desktop + 375 px | **Playwright (TS), HTML report** | `e2e/expenseflow.spec.ts` | 15 cases × 2 projects = 30 |
+
+**Totals:** 186 Vitest tests in 10 files plus 30 Playwright runs. **Coverage** (`npm run test:coverage`, report in `coverage/`): 90.6% statements · 83.9% branches · 86.9% functions · 94.0% lines.
 
 ## E2E cases (README §12 — all 10 automated, required minimum was 03/05/06/09/10)
 | ID | Case | Test |
@@ -54,6 +62,7 @@ Tests run against `src/api/mock.ts` (contract-v1 + README business rules) with z
 | Design system | `format.test.ts`, `pages.test.tsx` | INR lakh grouping, compact units, durations; every status has a label/tone; +N flag tooltip trigger has an accessible name; city combobox keyboard + free text |
 
 ## Bugs these tests caught (fixed)
+- `getPayoutBatch` (GET `/api/payout-batches/{id}` in the swagger) was missing from `src/api/endpoints.ts`; added.
 - **E2E:** after Approve / Send back / Reject the approver stayed on the claim with no confirmation. The decision bar unmounts when the claim refetches, and TanStack Query drops per-call `mutate()` callbacks for unmounted observers. Fixed with `mutateAsync`; a component regression test covers it.
 - **E2E infra:** Vite reloaded the page whenever Playwright wrote trace files under `e2e/`, so the folder is now excluded from the watcher.
 - Adding a line crashed for one render: the line previews lagged behind the field array.

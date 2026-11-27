@@ -1,6 +1,9 @@
 import { api } from "./client"
 import type {
   BulkApproveResponse,
+  BulkUserResponse,
+  CreateUserRequest,
+  CreateUserResponse,
   AuditEvent,
   Claim,
   ClaimLineInput,
@@ -68,9 +71,17 @@ export const Api = {
     api<Page<PayoutBatch>>("/api/payout-batches", { query: { status, size: 50 } }),
   createPayoutBatch: (claimIds: number[], idempotencyKey: string) =>
     api<PayoutBatch>("/api/payout-batches", { method: "POST", body: { claimIds }, idempotencyKey }),
+  getPayoutBatch: (id: number) => api<PayoutBatch>(`/api/payout-batches/${id}`),
   retryPayoutBatch: (id: number) => api<PayoutBatch>(`/api/payout-batches/${id}/retry`, { method: "POST" }),
   downloadPayoutFile: (id: number) => api<Response>(`/api/payout-batches/${id}/file`, { raw: true }),
 
   getDashboard: (from?: string, to?: string) => api<DashboardSummary>("/api/dashboard/summary", { query: { from, to } }),
   getPolicy: () => api<PolicyConfig>("/api/policy-rules"),
+
+  createUser: (body: CreateUserRequest) => api<CreateUserResponse>("/api/admin/users", { method: "POST", body }),
+  bulkCreateUsers: (file: File) => {
+    const fd = new FormData()
+    fd.append("file", file)
+    return api<BulkUserResponse>("/api/admin/users/bulk", { method: "POST", body: fd })
+  },
 }

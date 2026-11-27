@@ -36,3 +36,22 @@ export function renderAt(path: string, routes: { path: string; element: ReactEle
   )
   return { user, ...utils }
 }
+
+/** Renders the whole app (routes, guards, shell) at a path. */
+export async function renderApp(path: string) {
+  const { default: App } = await import("@/App")
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const user = userEvent.setup()
+  const utils = render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={[path]}>
+        <AuthProvider>
+          <TooltipProvider delay={0}>
+            <App />
+          </TooltipProvider>
+        </AuthProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  return { user, ...utils }
+}
