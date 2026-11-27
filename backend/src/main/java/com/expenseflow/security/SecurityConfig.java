@@ -10,6 +10,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import com.expenseflow.filter.CorrelationIdFilter;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
+import java.io.IOException;
 
 @Configuration
 @EnableMethodSecurity
@@ -38,7 +42,28 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()
                 )
+                .exceptionHandling(e -> e
+                        // No/expired token -> 401 so the SPA can send the user back to /login
+                        .authenticationEntryPoint((req, res, ex) ->
+                                writeProblem(res, 401, "Unauthorized", "Missing or expired token", req.getRequestURI()))
+                        .accessDeniedHandler((req, res, ex) ->
+                                writeProblem(res, 403, "Forbidden", "You are not allowed to perform this action", req.getRequestURI())))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    private static void writeProblem(HttpServletResponse res, int status, String title, String detail, String instance)
+            throws IOException {
+        String cid = MDC.get(CorrelationIdFilter.MDC_KEY);
+        res.setStatus(status);
+        res.setContentType("application/problem+json");
+        res.setCharacterEncoding("UTF-8");
+        res.getWriter().write("{\"type\":\"about:blank\",\"title\":\"" + title + "\",\"status\":" + status
+                + ",\"detail\":\"" + detail + "\",\"instance\":\"" + escape(instance) + "\""
+                + (cid == null ? "" : ",\"correlationId\":\"" + escape(cid) + "\"") + ",\"errors\":[]}");
+    }
+
+    private static String escape(String v) {
+        return v == null ? "" : v.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }
