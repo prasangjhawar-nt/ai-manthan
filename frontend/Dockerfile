@@ -13,7 +13,7 @@ RUN if [ -f package.json ]; then \
     fi
 
 # ---- runtime ----
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 # base images lag behind Alpine security fixes: patch OS packages at build time, then drop back to the nginx user
 USER root
 RUN apk upgrade --no-cache
